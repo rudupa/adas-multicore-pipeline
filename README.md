@@ -54,6 +54,34 @@ cmake --build build --config Release
 ./build/adas_pipeline path/to/config.json
 ```
 
+## Interactive Desktop Viewer (ImGui + ImPlot)
+
+This project also includes an optional desktop visualization app:
+
+- executable: `adas_viewer`
+- stack: Dear ImGui + ImPlot + GLFW + OpenGL
+- mode: native desktop window (not browser)
+
+Build (enabled by default):
+
+```bash
+cmake -B build -DADAS_BUILD_IMGUI_VIEWER=ON
+cmake --build build --config Release
+```
+
+Run:
+
+```bash
+./build/adas_viewer
+# or custom config
+./build/adas_viewer path/to/config.json
+```
+
+Viewer features:
+- live lane-based timeline plot (sensor/stage/throttle/drop)
+- per-second throughput chart (frames/sec)
+- controls for timeline window and auto-scroll
+
 ## Configuration
 
 Edit `config/pipeline_config.json`:

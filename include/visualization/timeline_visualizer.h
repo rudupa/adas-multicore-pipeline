@@ -44,6 +44,14 @@ public:
         char        glyph = 'X';
     };
 
+    /// Immutable copy of current visualization buffers.
+    struct Snapshot {
+        std::vector<Event>       events;
+        std::vector<Marker>      markers;
+        std::vector<std::string> lane_order;
+        TimePoint                origin;
+    };
+
     // ── Recording (thread-safe) ────────────────────────────────────
 
     /// Record a span event (e.g. stage processing, sensor generation).
@@ -76,6 +84,9 @@ public:
 
     void print_waterfall(size_t max_frames = 20,
                          int width_chars = 100) const;
+
+    /// Return a consistent point-in-time copy of all lanes/events.
+    Snapshot snapshot() const;
 
     /// Reset all recorded data.
     void reset();

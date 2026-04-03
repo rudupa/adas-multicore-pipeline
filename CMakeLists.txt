@@ -9,6 +9,8 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(ADAS_BUILD_IMGUI_VIEWER "Build ImGui + ImPlot desktop viewer" ON)
+
 # ── Fetch nlohmann/json for config parsing ──────────────────────────
 include(FetchContent)
 FetchContent_Declare(
@@ -17,6 +19,57 @@ FetchContent_Declare(
     GIT_TAG        v3.11.3
 )
 FetchContent_MakeAvailable(json)
+
+if(ADAS_BUILD_IMGUI_VIEWER)
+    # Dear ImGui (with GLFW + OpenGL3 backends)
+    FetchContent_Declare(
+        imgui
+        GIT_REPOSITORY https://github.com/ocornut/imgui.git
+        GIT_TAG        v1.91.9b
+    )
+
+    # ImPlot (plot widgets for ImGui)
+    FetchContent_Declare(
+        implot
+        GIT_REPOSITORY https://github.com/epezent/implot.git
+        GIT_TAG        v0.16
+    )
+
+    # GLFW window/context management
+    FetchContent_Declare(
+        glfw
+        GIT_REPOSITORY https://github.com/glfw/glfw.git
+        GIT_TAG        3.4
+    )
+
+    FetchContent_MakeAvailable(imgui implot glfw)
+
+    add_library(imgui_lib STATIC
+        ${imgui_SOURCE_DIR}/imgui.cpp
+        ${imgui_SOURCE_DIR}/imgui_draw.cpp
+        ${imgui_SOURCE_DIR}/imgui_tables.cpp
+        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+        ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+        ${implot_SOURCE_DIR}/implot.cpp
+        ${implot_SOURCE_DIR}/implot_items.cpp
+    )
+
+    target_include_directories(imgui_lib PUBLIC
+        ${imgui_SOURCE_DIR}
+        ${imgui_SOURCE_DIR}/backends
+        ${implot_SOURCE_DIR}
+    )
+
+    target_link_libraries(imgui_lib PUBLIC glfw)
+
+    if(WIN32)
+        target_link_libraries(imgui_lib PUBLIC opengl32)
+    else()
+        find_package(OpenGL REQUIRED)
+        target_link_libraries(imgui_lib PUBLIC OpenGL::GL)
+    endif()
+endif()
 
 # ── Source files ────────────────────────────────────────────────────
 set(CORE_SOURCES
@@ -76,6 +129,11 @@ endif()
 # ── Main executable ─────────────────────────────────────────────────
 add_executable(adas_pipeline src/main.cpp)
 target_link_libraries(adas_pipeline PRIVATE adas_pipeline_lib)
+
+if(ADAS_BUILD_IMGUI_VIEWER)
+    add_executable(adas_viewer src/viewer/adas_viewer.cpp)
+    target_link_libraries(adas_viewer PRIVATE adas_pipeline_lib imgui_lib)
+endif()
 
 # ── Copy config to build directory ──────────────────────────────────
 configure_file(

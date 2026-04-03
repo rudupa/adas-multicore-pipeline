@@ -266,4 +266,14 @@ void TimelineVisualizer::print_waterfall(size_t max_frames,
     std::printf("%s", render_waterfall(max_frames, width_chars).c_str());
 }
 
+TimelineVisualizer::Snapshot TimelineVisualizer::snapshot() const {
+    std::lock_guard lock(mutex_);
+    Snapshot s;
+    s.events     = events_;
+    s.markers    = markers_;
+    s.lane_order = lane_order_;
+    s.origin     = origin_;
+    return s;
+}
+
 } // namespace adas
