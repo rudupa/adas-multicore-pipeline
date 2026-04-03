@@ -45,6 +45,10 @@ set(METRICS_SOURCES
     src/metrics/metrics_collector.cpp
 )
 
+set(VISUALIZATION_SOURCES
+    src/visualization/timeline_visualizer.cpp
+)
+
 # ── Library target ──────────────────────────────────────────────────
 add_library(adas_pipeline_lib STATIC
     ${CORE_SOURCES}
@@ -52,6 +56,7 @@ add_library(adas_pipeline_lib STATIC
     ${PIPELINE_SOURCES}
     ${SCHEDULER_SOURCES}
     ${METRICS_SOURCES}
+    ${VISUALIZATION_SOURCES}
 )
 
 target_include_directories(adas_pipeline_lib PUBLIC

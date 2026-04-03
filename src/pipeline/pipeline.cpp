@@ -9,6 +9,7 @@
 
 #include <chrono>
 #include <cstdio>
+#include <map>
 #include <thread>
 
 namespace adas {
@@ -67,6 +68,9 @@ Pipeline::~Pipeline() {
 // ────────────────────────────────────────────────────────────────────
 void Pipeline::start() {
     if (running_.exchange(true)) return; // already running
+
+    // Set timeline origin
+    visualizer_.set_origin(Clock::now());
 
     // Start sensors
     for (auto& s : sensors_) {
@@ -151,6 +155,8 @@ void Pipeline::run() {
     stop();
 
     metrics_.print_summary();
+    visualizer_.print();
+    visualizer_.print_waterfall();
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -164,6 +170,12 @@ void Pipeline::sensor_loop(Sensor* sensor) {
         // Assign global monotonic id
         frame->frame_id = global_frame_id_.fetch_add(1);
 
+        // Visualize: short marker for frame creation (not the FPS sleep)
+        visualizer_.record_event(sensor->name(), frame->created_at,
+                                 frame->created_at +
+                                     std::chrono::microseconds(200),
+                                 '#', frame->frame_id);
+
         // ── Bandwidth check ────────────────────────────────────────
         uint64_t delay_us = bw_manager_.request(
             sensor->name(), frame->data_size,
@@ -173,10 +185,14 @@ void Pipeline::sensor_loop(Sensor* sensor) {
             // Throttled — either delay or drop.
             // Policy: delay up to 5 ms, else drop the frame.
             if (delay_us <= 5000) {
+                auto throttle_start = Clock::now();
                 std::this_thread::sleep_for(
                     std::chrono::microseconds(delay_us));
+                visualizer_.record_event("BW-throttle", throttle_start,
+                                         Clock::now(), '~', frame->frame_id);
             } else {
                 metrics_.record_frame_drop(sensor->name());
+                visualizer_.record_marker("frame-drop", Clock::now(), 'X');
                 continue; // drop
             }
         }
@@ -189,11 +205,17 @@ void Pipeline::sensor_loop(Sensor* sensor) {
         if (!ingress_queue_.try_push(std::move(frame))) {
             // Queue full — drop
             metrics_.record_frame_drop(sensor->name());
+            visualizer_.record_marker("frame-drop", Clock::now(), 'X');
         }
     }
 }
 
 void Pipeline::process_frame(std::shared_ptr<Frame> frame) {
+    // Stage glyph mapping for the timeline
+    static const std::map<std::string, char> stage_glyph = {
+        {"preprocess", 'P'}, {"detection", 'D'}, {"tracking", 'T'}
+    };
+
     for (auto& stage : stages_) {
         auto queue_enter = Clock::now();
 
@@ -208,6 +230,13 @@ void Pipeline::process_frame(std::shared_ptr<Frame> frame) {
         auto stage_dur   = std::chrono::duration_cast<Duration>(
             stage_end - stage_start);
         metrics_.record_stage_time(frame->frame_id, stage->name(), stage_dur);
+
+        // Visualize: per-stage span
+        char g = '#';
+        auto git = stage_glyph.find(stage->name());
+        if (git != stage_glyph.end()) g = git->second;
+        visualizer_.record_event(stage->name(), stage_start, stage_end,
+                                 g, frame->frame_id);
     }
 
     frame->pipeline_exit = Clock::now();

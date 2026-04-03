@@ -70,6 +70,10 @@ Edit `config/pipeline_config.json`:
 }
 ```
 
+## Documentation
+
+- [ADAS Pipeline Architecture & Timing Visualization](docs/system/ADAS_Pipeline.md)
+
 ## Extension Points (TODOs)
 
 - **LidarSensor** — add a new sensor type implementing `Sensor` interface

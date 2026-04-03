@@ -7,6 +7,7 @@
 #include "core/types.h"
 #include "metrics/metrics_collector.h"
 #include "pipeline/pipeline_stage.h"
+#include "visualization/timeline_visualizer.h"
 #include "scheduler/scheduler.h"
 #include "sensors/sensor.h"
 
@@ -42,6 +43,9 @@ public:
     MetricsCollector&       metrics()       { return metrics_; }
     const MetricsCollector& metrics() const { return metrics_; }
 
+    TimelineVisualizer&       visualizer()       { return visualizer_; }
+    const TimelineVisualizer& visualizer() const { return visualizer_; }
+
 private:
     // Sensor producer loop (one per sensor, runs on its own thread).
     void sensor_loop(Sensor* sensor);
@@ -56,6 +60,7 @@ private:
     std::unique_ptr<ThreadPool>                 pool_;
     BandwidthManager                            bw_manager_;
     MetricsCollector                            metrics_;
+    TimelineVisualizer                          visualizer_;
 
     // Inter-stage queue (sensor → first stage entrance)
     ConcurrentQueue<std::shared_ptr<Frame>>     ingress_queue_;
