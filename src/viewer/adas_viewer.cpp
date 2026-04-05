@@ -19,6 +19,7 @@
 #include <memory>
 #include <limits>
 #include <set>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -184,6 +185,106 @@ bool load_compute_profiles_from_json(const std::string& path,
     out_profiles = std::move(parsed);
     error.clear();
     return true;
+}
+
+std::string trim_copy(const std::string& input) {
+    size_t start = 0;
+    while (start < input.size() && std::isspace(static_cast<unsigned char>(input[start]))) {
+        ++start;
+    }
+    size_t end = input.size();
+    while (end > start && std::isspace(static_cast<unsigned char>(input[end - 1]))) {
+        --end;
+    }
+    return input.substr(start, end - start);
+}
+
+bool load_text_file(const std::string& path, std::string& content, std::string& error) {
+    std::ifstream ifs(path, std::ios::in | std::ios::binary);
+    if (!ifs.is_open()) {
+        error = "file not found";
+        return false;
+    }
+
+    std::ostringstream buffer;
+    buffer << ifs.rdbuf();
+    content = buffer.str();
+    error.clear();
+    return true;
+}
+
+bool load_first_available_text_file(const std::vector<std::string>& candidate_paths,
+                                    std::string& content,
+                                    std::string& loaded_path,
+                                    std::string& error) {
+    for (const auto& path : candidate_paths) {
+        if (load_text_file(path, content, error)) {
+            loaded_path = path;
+            return true;
+        }
+    }
+    loaded_path.clear();
+    return false;
+}
+
+void render_markdown_text(const std::string& markdown) {
+    std::istringstream stream(markdown);
+    std::string line;
+    while (std::getline(stream, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+
+        const std::string trimmed = trim_copy(line);
+        if (trimmed.empty()) {
+            ImGui::Spacing();
+            continue;
+        }
+        if (trimmed == "---") {
+            ImGui::Separator();
+            continue;
+        }
+        if (trimmed.rfind("### ", 0) == 0) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.86f, 1.00f, 1.0f));
+            ImGui::TextWrapped("%s", trimmed.c_str() + 4);
+            ImGui::PopStyleColor();
+            continue;
+        }
+        if (trimmed.rfind("## ", 0) == 0) {
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.84f, 0.92f, 1.00f, 1.0f));
+            ImGui::TextWrapped("%s", trimmed.c_str() + 3);
+            ImGui::PopStyleColor();
+            ImGui::Separator();
+            continue;
+        }
+        if (trimmed.rfind("# ", 0) == 0) {
+            ImGui::Spacing();
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.97f, 1.00f, 1.0f));
+            ImGui::TextWrapped("%s", trimmed.c_str() + 2);
+            ImGui::PopStyleColor();
+            ImGui::Separator();
+            continue;
+        }
+        if (trimmed.rfind("- ", 0) == 0 || trimmed.rfind("* ", 0) == 0) {
+            ImGui::BulletText("%s", trimmed.c_str() + 2);
+            continue;
+        }
+        const size_t numbered_sep = trimmed.find(". ");
+        if (numbered_sep != std::string::npos && numbered_sep > 0 &&
+            std::all_of(trimmed.begin(), trimmed.begin() + static_cast<std::ptrdiff_t>(numbered_sep),
+                        [](unsigned char ch) { return std::isdigit(ch) != 0; })) {
+            ImGui::BulletText("%s", trimmed.c_str() + numbered_sep + 2);
+            continue;
+        }
+        if (trimmed.rfind("> ", 0) == 0) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.75f, 0.78f, 0.82f, 1.0f));
+            ImGui::TextWrapped("%s", trimmed.c_str() + 2);
+            ImGui::PopStyleColor();
+            continue;
+        }
+        ImGui::TextWrapped("%s", trimmed.c_str());
+    }
 }
 
 adas::PipelineConfig make_runtime_config(const adas::PipelineConfig& base_cfg,
@@ -474,9 +575,28 @@ int main(int argc, char* argv[]) {
     float view_window_ms = 200.0f;
     float manual_view_start_ms = 0.0f;
     bool show_frame_numbers = true;
+    bool show_help_window = false;
     std::map<std::string, bool> lane_visibility;
     std::vector<LaneDef> lane_defs = build_ordered_lanes(runtime_cfg);
     std::map<std::string, int> lane_thread_counts = build_lane_thread_counts(runtime_cfg);
+    std::string help_doc_markdown;
+    std::string help_doc_loaded_path;
+    std::string help_doc_status = "Help content not loaded yet";
+
+    auto load_help_doc = [&]() {
+        const std::vector<std::string> candidate_paths = {
+            "docs/System/Simulator_Concepts.md",
+            "docs/system/Simulator_Concepts.md"
+        };
+        std::string error;
+        if (load_first_available_text_file(candidate_paths, help_doc_markdown, help_doc_loaded_path, error)) {
+            help_doc_status = "Loaded help content from " + help_doc_loaded_path;
+        } else {
+            help_doc_markdown.clear();
+            help_doc_loaded_path.clear();
+            help_doc_status = "Unable to load help content: " + error;
+        }
+    };
 
     std::vector<double> throughput_t;
     std::vector<double> throughput_fps;
@@ -572,19 +692,108 @@ int main(int argc, char* argv[]) {
         }
 
         ImGuiViewport* vp = ImGui::GetMainViewport();
-        const ImVec2 work_pos = vp->WorkPos;
-        const ImVec2 work_size = vp->WorkSize;
+        const float outer_pad = 5.0f;
+        const ImVec2 work_pos = ImVec2(vp->WorkPos.x + outer_pad, vp->WorkPos.y + outer_pad);
+        const ImVec2 work_size = ImVec2(
+            std::max(120.0f, vp->WorkSize.x - outer_pad * 2.0f),
+            std::max(120.0f, vp->WorkSize.y - outer_pad * 2.0f));
         const float gap = 10.0f;
+        const float top_bar_h = 30.0f;
+        const float bottom_bar_h = 28.0f;
+        const float content_y = work_pos.y + top_bar_h + gap;
+        const float content_h = std::max(120.0f, work_size.y - top_bar_h - bottom_bar_h - gap * 2.0f);
 
         const float left_w = 540.0f;
         const float top_h = 300.0f;
         const float right_w = work_size.x - left_w - gap;
-        const float timeline_h = work_size.y - top_h - gap;
+        const float timeline_h = content_h - top_h - gap;
 
         manual_view_start_ms = std::clamp(manual_view_start_ms, 0.0f, max_timeline_start_ms);
 
         ImGui::SetNextWindowPos(ImVec2(work_pos.x, work_pos.y), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(left_w, work_size.y), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(work_size.x, top_bar_h), ImGuiCond_Always);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 4.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1.0f);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.11f, 0.12f, 0.14f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.18f, 0.20f, 0.23f, 1.0f));
+        ImGui::Begin("##top_strip", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar |
+                         ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::AlignTextToFramePadding();
+        if (ImGui::Button("File")) {}
+        ImGui::SameLine();
+        if (ImGui::Button("View")) {}
+        ImGui::SameLine();
+        if (ImGui::Button("Simulation")) {}
+        ImGui::SameLine();
+        if (ImGui::Button("Help")) {
+            show_help_window = true;
+            if (help_doc_markdown.empty()) {
+                load_help_doc();
+            }
+        }
+
+        const float top_controls_w = 360.0f;
+        const float top_controls_x = ImGui::GetWindowContentRegionMax().x - top_controls_w;
+        if (top_controls_x > ImGui::GetCursorPosX() + 20.0f) {
+            ImGui::SameLine(top_controls_x);
+        } else {
+            ImGui::SameLine();
+        }
+        if (ImGui::Button("A-")) {
+            ui_scale = std::max(1.10f, ui_scale - 0.05f);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("A+")) {
+            ui_scale = std::min(2.20f, ui_scale + 0.05f);
+        }
+        ImGui::SameLine();
+        ImGui::Text("UI %.2fx", ui_scale);
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        ImGui::Checkbox("Frames", &show_frame_numbers);
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        if (ImGui::Button("Reset View")) {
+            manual_view_start_ms = 0.0f;
+        }
+        ImGui::End();
+        ImGui::PopStyleColor(2);
+        ImGui::PopStyleVar(3);
+
+        if (show_help_window) {
+            ImGui::SetNextWindowPos(ImVec2(work_pos.x + work_size.x * 0.12f, content_y + 24.0f), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowSize(ImVec2(work_size.x * 0.76f, content_h * 0.80f), ImGuiCond_FirstUseEver);
+            if (ImGui::Begin("ADAS Concepts & Help", &show_help_window, ImGuiWindowFlags_NoCollapse)) {
+                ImGui::TextDisabled("This guide is backed by a markdown document so it can evolve with the simulator.");
+                if (!help_doc_loaded_path.empty()) {
+                    ImGui::SameLine();
+                    ImGui::Text("Source: %s", help_doc_loaded_path.c_str());
+                }
+                ImGui::SameLine();
+                if (ImGui::Button("Reload help")) {
+                    load_help_doc();
+                }
+                ImGui::Separator();
+                ImGui::TextWrapped("%s", help_doc_status.c_str());
+                ImGui::Separator();
+                ImGui::BeginChild("help_doc_scroll", ImVec2(0.0f, 0.0f), false);
+                if (!help_doc_markdown.empty()) {
+                    render_markdown_text(help_doc_markdown);
+                } else {
+                    ImGui::TextWrapped("Help content is not available. Keep the markdown file in docs/System to populate this panel.");
+                }
+                ImGui::EndChild();
+            }
+            ImGui::End();
+        }
+
+        ImGui::SetNextWindowPos(ImVec2(work_pos.x, content_y), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(left_w, content_h), ImGuiCond_Always);
         ImGui::Begin("Pipeline Inspector", nullptr,
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
@@ -956,7 +1165,7 @@ int main(int argc, char* argv[]) {
 
         ImGui::End();
 
-        ImGui::SetNextWindowPos(ImVec2(work_pos.x + left_w + gap, work_pos.y), ImGuiCond_Always);
+        ImGui::SetNextWindowPos(ImVec2(work_pos.x + left_w + gap, content_y), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(right_w, top_h), ImGuiCond_Always);
         ImGui::Begin("Throughput", nullptr,
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
@@ -969,7 +1178,64 @@ int main(int argc, char* argv[]) {
         }
         ImGui::End();
 
-        ImGui::SetNextWindowPos(ImVec2(work_pos.x + left_w + gap, work_pos.y + top_h + gap), ImGuiCond_Always);
+        const char* sim_status = sim_running ? "RUNNING" : (sim_done ? "COMPLETE" : "STOPPED");
+        const ImVec4 sim_status_color = sim_running
+            ? ImVec4(0.86f, 0.98f, 0.90f, 1.0f)
+            : (sim_done ? ImVec4(0.99f, 0.96f, 0.82f, 1.0f) : ImVec4(0.95f, 0.96f, 0.98f, 1.0f));
+        const auto* active_profile_label = profiles.empty()
+            ? "n/a"
+            : profiles[static_cast<size_t>(std::clamp(selected_profile_index, 0,
+                                                      static_cast<int>(profiles.size()) - 1))].label.c_str();
+
+        ImGui::SetNextWindowPos(ImVec2(work_pos.x, content_y + content_h + gap), ImGuiCond_Always);
+        ImGui::SetNextWindowSize(ImVec2(work_size.x, bottom_bar_h), ImGuiCond_Always);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 5.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.02f, 0.36f, 0.73f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.02f, 0.36f, 0.73f, 1.0f));
+        ImGui::Begin("##bottom_strip", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoScrollbar |
+                         ImGuiWindowFlags_NoScrollWithMouse);
+        ImGui::AlignTextToFramePadding();
+        ImGui::PushStyleColor(ImGuiCol_Text, sim_status_color);
+        ImGui::TextUnformatted(sim_status);
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        ImGui::Text("cycles %zu", cycle_count);
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        ImGui::Text("drops %zu", drops);
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        ImGui::Text("missed %zu", missed_cycles);
+        ImGui::SameLine();
+        ImGui::TextDisabled("|");
+        ImGui::SameLine();
+        ImGui::Text("overlap %zu", overlap_cycles);
+
+        const std::string right_status =
+            std::string("profile ") + active_profile_label +
+            "  |  mode " + stage_timing_mode +
+            "  |  policy " + kCycleModeLabels[selected_cycle_mode];
+        const float right_status_w = ImGui::CalcTextSize(right_status.c_str()).x;
+        const float right_x = ImGui::GetWindowContentRegionMax().x - right_status_w;
+        if (right_x > ImGui::GetCursorPosX() + 20.0f) {
+            ImGui::SameLine(right_x);
+        } else {
+            ImGui::SameLine();
+        }
+        ImGui::TextUnformatted(right_status.c_str());
+        ImGui::End();
+        ImGui::PopStyleColor(2);
+        ImGui::PopStyleVar(3);
+
+        ImGui::SetNextWindowPos(ImVec2(work_pos.x + left_w + gap, content_y + top_h + gap), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(right_w, timeline_h), ImGuiCond_Always);
         ImGui::Begin("Pipeline Timeline", nullptr,
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);

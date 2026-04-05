@@ -107,6 +107,7 @@ Additional architecture-level example:
 ## Documentation
 
 - [ADAS Pipeline Architecture](docs/system/ADAS_Pipeline.md)
+- [Simulator Concepts Guide](docs/System/Simulator_Concepts.md)
 
 ## Mermaid Generator Tool
 
