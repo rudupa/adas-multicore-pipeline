@@ -190,7 +190,7 @@ adas::PipelineConfig make_runtime_config(const adas::PipelineConfig& base_cfg,
                                          const std::map<std::string, bool>& sensor_enabled,
                                          const ComputeProfileDef& profile,
                                          const std::string& central_cycle_mode,
-                                         const std::map<std::string, float>& stage_scales,
+                                         float global_stage_scale,
                                          const std::string& stage_timing_mode,
                                          bool stage_timing_sampled,
                                          uint32_t stage_spin_guard_us) {
@@ -210,9 +210,8 @@ adas::PipelineConfig make_runtime_config(const adas::PipelineConfig& base_cfg,
                        }),
         runtime_cfg.sensors.end());
 
+    const double total_scale = profile.stage_delay_scale * static_cast<double>(global_stage_scale);
     for (auto& stage : runtime_cfg.stages) {
-        const float stage_scale = stage_scales.count(stage.id) ? stage_scales.at(stage.id) : 1.0f;
-        const double total_scale = profile.stage_delay_scale * static_cast<double>(stage_scale);
         stage.delay_us_min = static_cast<uint32_t>(std::max(1.0, std::round(static_cast<double>(stage.delay_us_min) * total_scale)));
         stage.delay_us = static_cast<uint32_t>(std::max(1.0, std::round(static_cast<double>(stage.delay_us) * total_scale)));
         stage.delay_us_max = static_cast<uint32_t>(std::max(1.0, std::round(static_cast<double>(stage.delay_us_max) * total_scale)));
@@ -415,10 +414,7 @@ int main(int argc, char* argv[]) {
         sensor_enabled[sensor.name] = true;
     }
 
-    std::map<std::string, float> stage_scales;
-    for (const auto& stage : base_cfg.stages) {
-        stage_scales[stage.id] = 1.0f;
-    }
+    float global_stage_scale = 1.0f;
     std::string stage_timing_mode = to_lower_copy(base_cfg.stage_timing_mode);
     if (stage_timing_mode != "sleep" && stage_timing_mode != "spin" && stage_timing_mode != "hybrid") {
         stage_timing_mode = "hybrid";
@@ -431,7 +427,7 @@ int main(int argc, char* argv[]) {
         sensor_enabled,
         profiles[static_cast<size_t>(selected_profile_index)],
         kCycleModeIds[selected_cycle_mode],
-        stage_scales,
+        global_stage_scale,
         stage_timing_mode,
         stage_timing_sampled,
         static_cast<uint32_t>(std::max(0, stage_spin_guard_us)));
@@ -590,9 +586,93 @@ int main(int argc, char* argv[]) {
         ImGui::SetNextWindowPos(ImVec2(work_pos.x, work_pos.y), ImGuiCond_Always);
         ImGui::SetNextWindowSize(ImVec2(left_w, work_size.y), ImGuiCond_Always);
         ImGui::Begin("Pipeline Inspector", nullptr,
-                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-        // ── Simulator Controls (always first) ──────────────────────
-        if (ImGui::TreeNodeEx("Simulator Controls", ImGuiTreeNodeFlags_DefaultOpen)) {
+                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize |
+                         ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+
+        // Only open sections consume body height; closed sections collapse to headers.
+        static bool sec_open[3] = { true, true, true };
+        static float sec_frac[3] = { 0.40f, 0.35f, 0.25f }; // sim / visibility / status
+
+        const float splitter_h = 6.0f;
+        const float header_h = ImGui::GetFrameHeightWithSpacing();
+        const int visible_splitters =
+            (sec_open[0] && sec_open[1] ? 1 : 0) +
+            (sec_open[1] && sec_open[2] ? 1 : 0);
+        const float header_reserve = header_h * 3.0f + splitter_h * static_cast<float>(visible_splitters);
+        const float inspector_h   = ImGui::GetContentRegionAvail().y;
+        const float usable_h      = std::max(1.0f, inspector_h - header_reserve);
+
+        float open_frac_sum = 0.0f;
+        for (int i = 0; i < 3; ++i) {
+            if (sec_open[i]) {
+                open_frac_sum += sec_frac[i];
+            }
+        }
+        if (open_frac_sum < 1e-4f) {
+            open_frac_sum = 1.0f;
+        }
+
+        auto draw_splitter = [&](const char* id, int a, int b) {
+            if (!sec_open[a] || !sec_open[b]) {
+                return;
+            }
+            ImGui::PushID(id);
+            ImGui::InvisibleButton("##splitter", ImVec2(-1.0f, splitter_h));
+            if (ImGui::IsItemHovered())
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+            if (ImGui::IsItemActive()) {
+                const float total_pair = sec_frac[a] + sec_frac[b];
+                const float min_frac = 80.0f * open_frac_sum / usable_h;
+                const float delta = ImGui::GetIO().MouseDelta.y * open_frac_sum / usable_h;
+                const float new_a = std::clamp(sec_frac[a] + delta, min_frac, total_pair - min_frac);
+                sec_frac[a] = new_a;
+                sec_frac[b] = total_pair - new_a;
+            }
+            const ImVec2 p = ImGui::GetItemRectMin();
+            const ImVec2 q = ImGui::GetItemRectMax();
+            const bool hovered = ImGui::IsItemHovered() || ImGui::IsItemActive();
+            const ImU32 col = hovered ? IM_COL32(120, 160, 220, 200) : IM_COL32(80, 90, 100, 120);
+            ImGui::GetWindowDrawList()->AddLine(
+                ImVec2(p.x, (p.y + q.y) * 0.5f),
+                ImVec2(q.x, (p.y + q.y) * 0.5f),
+                col, hovered ? 2.0f : 1.0f);
+            ImGui::PopID();
+        };
+
+        auto draw_section_header = [](const char* label, const ImVec4& color) {
+            ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 6.0f));
+            ImGui::PushStyleColor(ImGuiCol_Header, color);
+            ImGui::PushStyleColor(ImGuiCol_HeaderHovered, blend_color(color, ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 0.10f));
+            ImGui::PushStyleColor(ImGuiCol_HeaderActive, blend_color(color, ImVec4(1.0f, 1.0f, 1.0f, 1.0f), 0.18f));
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.98f, 0.98f, 0.98f, 1.0f));
+            const bool open = ImGui::CollapsingHeader(label, ImGuiTreeNodeFlags_DefaultOpen);
+            ImGui::PopStyleColor(4);
+            ImGui::PopStyleVar();
+            return open;
+        };
+
+        auto begin_section_body = [&](const char* id, int section_index) {
+            const float height = std::max(60.0f, usable_h * sec_frac[section_index] / open_frac_sum);
+            ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+            ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.10f, 0.12f, 0.15f, 0.94f));
+            ImGui::BeginChild(id, ImVec2(0.0f, height), true, ImGuiWindowFlags_HorizontalScrollbar);
+        };
+
+        auto end_section_body = []() {
+            ImGui::EndChild();
+            ImGui::PopStyleColor();
+            ImGui::PopStyleVar();
+        };
+
+        auto draw_stats_row = [](const std::string& /*lane*/, const std::string& label) {
+            ImGui::BulletText("%s", label.c_str());
+        };
+
+        sec_open[0] = draw_section_header("SIMULATION CONTROLS", ImVec4(0.16f, 0.24f, 0.34f, 1.0f));
+        if (sec_open[0]) {
+            begin_section_body("sim_controls_section", 0);
+            ImGui::TextDisabled("PROFILE + RUNTIME");
+
             std::vector<const char*> profile_labels;
             profile_labels.reserve(profiles.size());
             for (const auto& profile : profiles) {
@@ -604,11 +684,10 @@ int main(int argc, char* argv[]) {
                 selected_profile_index = std::clamp(selected_profile_index, 0,
                                                     static_cast<int>(profile_labels.size()) - 1);
             }
-            // Selected profile details
+
             {
                 const auto& sel = profiles[static_cast<size_t>(selected_profile_index)];
-                ImGui::Indent();
-                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.70f, 0.85f, 1.00f, 1.00f));
+                ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.72f, 0.86f, 1.00f, 1.00f));
                 char thr_buf[32];
                 if (sel.thread_pool_override > 0)
                     std::snprintf(thr_buf, sizeof(thr_buf), "%zu", sel.thread_pool_override);
@@ -622,13 +701,18 @@ int main(int argc, char* argv[]) {
                 }
                 ImGui::Text("Delay x%.2f  |  BW x%.2f  |  Threads: %s  |  Loop: %s",
                             sel.stage_delay_scale, sel.global_bandwidth_scale, thr_buf, loop_buf);
+                ImGui::Text("Global stage scale: x%.2f  |  Effective delay scale: x%.2f",
+                            global_stage_scale,
+                            sel.stage_delay_scale * static_cast<double>(global_stage_scale));
                 ImGui::Text("Central cycle policy: %s", central_cycle_mode_label(kCycleModeIds[selected_cycle_mode]));
                 ImGui::Text("Stage timing: %s | sampled: %s | spin guard: %d us",
                             stage_timing_mode.c_str(), stage_timing_sampled ? "on" : "off",
                             stage_spin_guard_us);
                 ImGui::PopStyleColor();
-                ImGui::Unindent();
             }
+
+            ImGui::Separator();
+            ImGui::TextDisabled("EXECUTION");
             ImGui::Combo("Cycle policy", &selected_cycle_mode,
                          kCycleModeLabels, IM_ARRAYSIZE(kCycleModeLabels));
             ImGui::TextUnformatted("Policy applies when simulation is restarted.");
@@ -643,25 +727,10 @@ int main(int argc, char* argv[]) {
             }
             ImGui::Checkbox("Sample stage duration between min/avg/max", &stage_timing_sampled);
             ImGui::SliderInt("Hybrid spin guard (us)", &stage_spin_guard_us, 0, 3000);
+            ImGui::SliderFloat("Global stage timing scale", &global_stage_scale, 0.20f, 3.00f, "x%.2f");
 
-            if (ImGui::TreeNodeEx("Per-stage timing scale", ImGuiTreeNodeFlags_DefaultOpen)) {
-                for (const auto& stage : base_cfg.stages) {
-                    float& scale = stage_scales[stage.id];
-                    ImGui::PushID(stage.id.c_str());
-                    ImGui::SetNextItemWidth(120.0f);
-                    ImGui::SliderFloat("##scale", &scale, 0.20f, 3.00f, "x%.2f");
-                    ImGui::SameLine();
-                    ImGui::TextUnformatted(stage.name.c_str());
-                    ImGui::PopID();
-                }
-                if (ImGui::Button("Reset stage scales")) {
-                    for (auto& [id, scale] : stage_scales) {
-                        (void)id;
-                        scale = 1.0f;
-                    }
-                }
-                ImGui::TreePop();
-            }
+            ImGui::Separator();
+            ImGui::TextDisabled("PROFILE SOURCE");
             char profile_path_buf[512]{};
             std::snprintf(profile_path_buf, sizeof(profile_path_buf), "%s", profile_json_path.c_str());
             if (ImGui::InputText("Profiles JSON", profile_path_buf, sizeof(profile_path_buf))) {
@@ -681,8 +750,9 @@ int main(int argc, char* argv[]) {
                 }
             }
             ImGui::TextWrapped("%s", profile_status.c_str());
+
             ImGui::Separator();
-            ImGui::TextUnformatted("Sensors (toggles apply on restart):");
+            ImGui::TextDisabled("SENSOR ENABLEMENT");
             for (const auto& sensor : base_cfg.sensors) {
                 std::string slabel = sensor.short_name.empty() ? sensor.name : sensor.short_name;
                 bool enabled = sensor_enabled[sensor.name];
@@ -692,6 +762,8 @@ int main(int argc, char* argv[]) {
                 ImGui::SameLine();
                 ImGui::Text("%s (%s)", slabel.c_str(), sensor.type.c_str());
             }
+
+            ImGui::Separator();
             if (ImGui::Button("Restart simulation with selected settings")) {
                 stop_simulation();
                 const auto& active_profile =
@@ -699,7 +771,7 @@ int main(int argc, char* argv[]) {
                                                             static_cast<int>(profiles.size()) - 1))];
                 runtime_cfg = make_runtime_config(base_cfg, sensor_enabled, active_profile,
                                                   kCycleModeIds[selected_cycle_mode],
-                                                  stage_scales,
+                                                  global_stage_scale,
                                                   stage_timing_mode,
                                                   stage_timing_sampled,
                                                   static_cast<uint32_t>(std::max(0, stage_spin_guard_us)));
@@ -718,163 +790,170 @@ int main(int argc, char* argv[]) {
                 manual_view_start_ms = 0.0f;
                 start_simulation();
             }
-            ImGui::TreePop();
+            end_section_body();
         }
 
-        ImGui::Separator();
+        draw_splitter("splitter_0_1", 0, 1);
 
-        // ── Status ──────────────────────────────────────────────────
-        ImGui::Text("Simulation: %s", sim_running ? "Running" : "Stopped");
-        ImGui::Text("Cycle count: %zu", cycle_count);
-        ImGui::Text("Dropped frames: %zu", drops);
-        ImGui::Text("Throttle events: %zu", throttles);
-        ImGui::Text("Missed cycles: %zu", missed_cycles);
-        ImGui::Text("Overlapped cycles: %zu", overlap_cycles);
-        ImGui::Separator();
+        sec_open[1] = draw_section_header("LANE VISIBILITY", ImVec4(0.24f, 0.20f, 0.34f, 1.0f));
+        if (sec_open[1]) {
+            begin_section_body("lane_visibility_section", 1);
+            ImGui::TextDisabled("SENSORS / PIPELINE / SYSTEM EVENTS");
 
-        // ── View controls ────────────────────────────────────────────
-        ImGui::SliderFloat("UI scale", &ui_scale, 1.10f, 2.20f, "%.2fx");
-        ImGui::SliderFloat("View window (ms)", &view_window_ms, 10.0f, 5000.0f, "%.0f");
-        const float page_step_ms = std::max(50.0f, view_window_ms * 0.25f);
-        if (ImGui::Button("|<")) {
-            manual_view_start_ms = 0.0f;
-        }
-        ImGui::SameLine();
-        if (ImGui::Button("<")) {
-            manual_view_start_ms = std::max(0.0f, manual_view_start_ms - page_step_ms);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(">")) {
-            manual_view_start_ms = std::min(max_timeline_start_ms, manual_view_start_ms + page_step_ms);
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(">|")) {
-            manual_view_start_ms = max_timeline_start_ms;
-        }
-        ImGui::SliderFloat("Timeline position (ms)", &manual_view_start_ms, 0.0f,
-                           std::max(0.0f, max_timeline_start_ms), "%.0f");
-        ImGui::Checkbox("Show frame numbers", &show_frame_numbers);
-        ImGui::TextUnformatted("Timeline: scroll to pan, Ctrl+scroll (pinch) to zoom window, drag to pan.");
-        if (const auto* acq_stage = find_stage(runtime_cfg, "sense_1_3_sensor_acquisition");
-            acq_stage != nullptr) {
-            auto it = lane_stats.find(acq_stage->lane);
-            if (it != lane_stats.end()) {
-                ImGui::Text("Central loop freq: %.2f Hz", it->second.freq_hz());
-            }
-        }
-        ImGui::Separator();
-
-        // ── Stats row helper: label only, details available on hover ─
-        auto draw_stats_row = [](const std::string& /*lane*/, const std::string& label) {
-            ImGui::BulletText("%s", label.c_str());
-        };
-
-        // ── Sensors group ────────────────────────────────────────────
-        {
-            int sv_total = 0, sv_vis = 0;
-            for (const auto& ld : lane_defs) {
-                if (!ld.is_sensor) continue;
-                ++sv_total;
-                if (lane_visibility.count(ld.key) && lane_visibility[ld.key]) ++sv_vis;
-            }
-            bool sg = sv_total > 0 && sv_vis == sv_total;
-            if (ImGui::Checkbox("##sensors_grp", &sg)) {
-                for (auto& ld : lane_defs) {
-                    if (ld.is_sensor) lane_visibility[ld.key] = sg;
+            {
+                int sv_total = 0, sv_vis = 0;
+                for (const auto& ld : lane_defs) {
+                    if (!ld.is_sensor) continue;
+                    ++sv_total;
+                    if (lane_visibility.count(ld.key) && lane_visibility[ld.key]) ++sv_vis;
                 }
-            }
-            ImGui::SameLine();
-            if (ImGui::TreeNodeEx("Sensors", ImGuiTreeNodeFlags_DefaultOpen)) {
-                for (const auto& lane_def : lane_defs) {
-                    if (!lane_def.is_sensor) continue;
-                    ImGui::Checkbox(("##vis_" + lane_def.key).c_str(), &lane_visibility[lane_def.key]);
-                    ImGui::SameLine();
-                    draw_stats_row(lane_def.key, lane_def.label);
-                }
-                ImGui::TreePop();
-            }
-        }
-
-        // ── Central ECU Pipeline group ───────────────────────────────
-        {
-            int cv_total = 0, cv_vis = 0;
-            for (const auto& ld : lane_defs) {
-                if (!ld.is_stage) continue;
-                ++cv_total;
-                if (lane_visibility.count(ld.key) && lane_visibility[ld.key]) ++cv_vis;
-            }
-            bool cg = cv_total > 0 && cv_vis == cv_total;
-            if (ImGui::Checkbox("##central_grp", &cg)) {
-                for (auto& ld : lane_defs) {
-                    if (ld.is_stage) lane_visibility[ld.key] = cg;
-                }
-            }
-            ImGui::SameLine();
-            if (ImGui::TreeNodeEx("Central ECU Pipeline", ImGuiTreeNodeFlags_DefaultOpen)) {
-                for (const auto& phase : runtime_cfg.phases) {
-                    if (ImGui::TreeNodeEx(phase.name.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
-                        for (const auto& stage_id : phase.stage_ids) {
-                            const auto* stage = find_stage(runtime_cfg, stage_id);
-                            if (!stage) {
-                                continue;
-                            }
-                            ImGui::Checkbox(("##vis_" + stage->lane).c_str(), &lane_visibility[stage->lane]);
-                            ImGui::SameLine();
-                            draw_stats_row(stage->lane, stage->name);
-                            if (!stage->substeps.empty()) {
-                                std::string substeps = "sub-steps: ";
-                                for (size_t index = 0; index < stage->substeps.size(); ++index) {
-                                    if (index > 0) {
-                                        substeps += " | ";
-                                    }
-                                    substeps += stage->substeps[index];
-                                }
-                                ImGui::TextWrapped("%s", substeps.c_str());
-                            }
-                        }
-                        ImGui::TreePop();
+                bool sg = sv_total > 0 && sv_vis == sv_total;
+                if (ImGui::Checkbox("##sensors_grp", &sg)) {
+                    for (auto& ld : lane_defs) {
+                        if (ld.is_sensor) lane_visibility[ld.key] = sg;
                     }
                 }
-                ImGui::TreePop();
+                ImGui::SameLine();
+                if (ImGui::TreeNodeEx("SENSORS", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+                    for (const auto& lane_def : lane_defs) {
+                        if (!lane_def.is_sensor) continue;
+                        ImGui::Checkbox(("##vis_" + lane_def.key).c_str(), &lane_visibility[lane_def.key]);
+                        ImGui::SameLine();
+                        draw_stats_row(lane_def.key, lane_def.label);
+                    }
+                    ImGui::TreePop();
+                }
             }
+
+            {
+                int cv_total = 0, cv_vis = 0;
+                for (const auto& ld : lane_defs) {
+                    if (!ld.is_stage) continue;
+                    ++cv_total;
+                    if (lane_visibility.count(ld.key) && lane_visibility[ld.key]) ++cv_vis;
+                }
+                bool cg = cv_total > 0 && cv_vis == cv_total;
+                if (ImGui::Checkbox("##central_grp", &cg)) {
+                    for (auto& ld : lane_defs) {
+                        if (ld.is_stage) lane_visibility[ld.key] = cg;
+                    }
+                }
+                ImGui::SameLine();
+                if (ImGui::TreeNodeEx("CENTRAL ECU PIPELINE", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+                    for (const auto& phase : runtime_cfg.phases) {
+                        if (ImGui::TreeNodeEx(phase.name.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+                            for (const auto& stage_id : phase.stage_ids) {
+                                const auto* stage = find_stage(runtime_cfg, stage_id);
+                                if (!stage) {
+                                    continue;
+                                }
+                                ImGui::Checkbox(("##vis_" + stage->lane).c_str(), &lane_visibility[stage->lane]);
+                                ImGui::SameLine();
+                                draw_stats_row(stage->lane, stage->name);
+                                if (!stage->substeps.empty()) {
+                                    std::string substeps = "sub-steps: ";
+                                    for (size_t index = 0; index < stage->substeps.size(); ++index) {
+                                        if (index > 0) {
+                                            substeps += " | ";
+                                        }
+                                        substeps += stage->substeps[index];
+                                    }
+                                    ImGui::TextWrapped("%s", substeps.c_str());
+                                }
+                            }
+                            ImGui::TreePop();
+                        }
+                    }
+                    ImGui::TreePop();
+                }
+            }
+
+            {
+                int syv_vis = 0;
+                if (lane_visibility.count("BW-throttle") && lane_visibility["BW-throttle"]) ++syv_vis;
+                if (lane_visibility.count("frame-drop") && lane_visibility["frame-drop"]) ++syv_vis;
+                if (lane_visibility.count("cycle-miss") && lane_visibility["cycle-miss"]) ++syv_vis;
+                if (lane_visibility.count("overlap") && lane_visibility["overlap"]) ++syv_vis;
+                bool syg = syv_vis == 4;
+                if (ImGui::Checkbox("##system_grp", &syg)) {
+                    lane_visibility["BW-throttle"] = syg;
+                    lane_visibility["frame-drop"] = syg;
+                    lane_visibility["cycle-miss"] = syg;
+                    lane_visibility["overlap"] = syg;
+                }
+                ImGui::SameLine();
+                if (ImGui::TreeNodeEx("SYSTEM EVENTS", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanAvailWidth)) {
+                    ImGui::Checkbox("##vis_BW-throttle", &lane_visibility["BW-throttle"]);
+                    ImGui::SameLine();
+                    draw_stats_row("BW-throttle", "BW-throttle");
+                    ImGui::Checkbox("##vis_frame-drop", &lane_visibility["frame-drop"]);
+                    ImGui::SameLine();
+                    ImGui::BulletText("frame-drop markers : %zu", drops);
+                    ImGui::Checkbox("##vis_cycle-miss", &lane_visibility["cycle-miss"]);
+                    ImGui::SameLine();
+                    ImGui::BulletText("cycle-miss markers : %zu", missed_cycles);
+                    ImGui::Checkbox("##vis_overlap", &lane_visibility["overlap"]);
+                    ImGui::SameLine();
+                    ImGui::BulletText("overlap markers : %zu", overlap_cycles);
+                    ImGui::TreePop();
+                }
+            }
+
+            end_section_body();
         }
 
-        // ── System Events group ──────────────────────────────────────
-        {
-            int syv_vis = 0;
-            if (lane_visibility.count("BW-throttle") && lane_visibility["BW-throttle"]) ++syv_vis;
-            if (lane_visibility.count("frame-drop") && lane_visibility["frame-drop"]) ++syv_vis;
-            if (lane_visibility.count("cycle-miss") && lane_visibility["cycle-miss"]) ++syv_vis;
-            if (lane_visibility.count("overlap") && lane_visibility["overlap"]) ++syv_vis;
-            bool syg = syv_vis == 4;
-            if (ImGui::Checkbox("##system_grp", &syg)) {
-                lane_visibility["BW-throttle"] = syg;
-                lane_visibility["frame-drop"] = syg;
-                lane_visibility["cycle-miss"] = syg;
-                lane_visibility["overlap"] = syg;
+        draw_splitter("splitter_1_2", 1, 2);
+
+        sec_open[2] = draw_section_header("STATUS & VIEW", ImVec4(0.22f, 0.30f, 0.22f, 1.0f));
+        if (sec_open[2]) {
+            begin_section_body("status_view_section", 2);
+            ImGui::TextDisabled("SIMULATION STATUS + TIMELINE NAVIGATION");
+
+            ImGui::Text("Simulation: %s", sim_running ? "Running" : "Stopped");
+            ImGui::Text("Cycle count: %zu", cycle_count);
+            ImGui::Text("Dropped frames: %zu", drops);
+            ImGui::Text("Throttle events: %zu", throttles);
+            ImGui::Text("Missed cycles: %zu", missed_cycles);
+            ImGui::Text("Overlapped cycles: %zu", overlap_cycles);
+            ImGui::Separator();
+
+            ImGui::SliderFloat("UI scale", &ui_scale, 1.10f, 2.20f, "%.2fx");
+            ImGui::SliderFloat("View window (ms)", &view_window_ms, 10.0f, 5000.0f, "%.0f");
+            const float page_step_ms = std::max(50.0f, view_window_ms * 0.25f);
+            if (ImGui::Button("|<")) {
+                manual_view_start_ms = 0.0f;
             }
             ImGui::SameLine();
-            if (ImGui::TreeNodeEx("System Events", ImGuiTreeNodeFlags_DefaultOpen)) {
-                ImGui::Checkbox("##vis_BW-throttle", &lane_visibility["BW-throttle"]);
-                ImGui::SameLine();
-                draw_stats_row("BW-throttle", "BW-throttle");
-                ImGui::Checkbox("##vis_frame-drop", &lane_visibility["frame-drop"]);
-                ImGui::SameLine();
-                ImGui::BulletText("frame-drop markers : %zu", drops);
-                ImGui::Checkbox("##vis_cycle-miss", &lane_visibility["cycle-miss"]);
-                ImGui::SameLine();
-                ImGui::BulletText("cycle-miss markers : %zu", missed_cycles);
-                ImGui::Checkbox("##vis_overlap", &lane_visibility["overlap"]);
-                ImGui::SameLine();
-                ImGui::BulletText("overlap markers : %zu", overlap_cycles);
-                ImGui::TreePop();
+            if (ImGui::Button("<")) {
+                manual_view_start_ms = std::max(0.0f, manual_view_start_ms - page_step_ms);
             }
+            ImGui::SameLine();
+            if (ImGui::Button(">")) {
+                manual_view_start_ms = std::min(max_timeline_start_ms, manual_view_start_ms + page_step_ms);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(">|")) {
+                manual_view_start_ms = max_timeline_start_ms;
+            }
+            ImGui::SliderFloat("Timeline position (ms)", &manual_view_start_ms, 0.0f,
+                               std::max(0.0f, max_timeline_start_ms), "%.0f");
+            ImGui::Checkbox("Show frame numbers", &show_frame_numbers);
+            ImGui::TextUnformatted("Timeline: scroll to pan, Ctrl+scroll (pinch) to zoom window, drag to pan.");
+            if (const auto* acq_stage = find_stage(runtime_cfg, "sense_1_3_sensor_acquisition");
+                acq_stage != nullptr) {
+                auto it = lane_stats.find(acq_stage->lane);
+                if (it != lane_stats.end()) {
+                    ImGui::Text("Central loop freq: %.2f Hz", it->second.freq_hz());
+                }
+            }
+
+            if (sim_done) {
+                ImGui::Separator();
+                ImGui::Text("Run complete. You can inspect the timeline and close the window.");
+            }
+            end_section_body();
         }
 
-        if (sim_done) {
-            ImGui::Separator();
-            ImGui::Text("Run complete. You can inspect the timeline and close the window.");
-        }
         ImGui::End();
 
         ImGui::SetNextWindowPos(ImVec2(work_pos.x + left_w + gap, work_pos.y), ImGuiCond_Always);
