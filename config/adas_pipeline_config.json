@@ -500,6 +500,106 @@
       }
     ]
   },
+  "cpu_cores": [
+    {
+      "core_id": 0,
+      "freq_ghz": 2.0,
+      "max_tasks": 4
+    },
+    {
+      "core_id": 1,
+      "freq_ghz": 2.0,
+      "max_tasks": 4
+    },
+    {
+      "core_id": 2,
+      "freq_ghz": 2.0,
+      "max_tasks": 4
+    },
+    {
+      "core_id": 3,
+      "freq_ghz": 2.0,
+      "max_tasks": 4
+    },
+    {
+      "core_id": 4,
+      "freq_ghz": 2.0,
+      "max_tasks": 4
+    },
+    {
+      "core_id": 5,
+      "freq_ghz": 2.0,
+      "max_tasks": 4
+    },
+    {
+      "core_id": 6,
+      "freq_ghz": 2.0,
+      "max_tasks": 4
+    },
+    {
+      "core_id": 7,
+      "freq_ghz": 2.0,
+      "max_tasks": 4
+    }
+  ],
+  "accelerators": [
+    {
+      "name": "gpu",
+      "inference_latency_us": 5000,
+      "max_queue_depth": 16,
+      "bandwidth_mbps": 100.0,
+      "scheduling": "fifo"
+    },
+    {
+      "name": "npu",
+      "inference_latency_us": 8000,
+      "max_queue_depth": 8,
+      "bandwidth_mbps": 50.0,
+      "scheduling": "priority"
+    }
+  ],
+  "sensor_jitter": [
+    {
+      "sensor_name": "cam_front_narrow",
+      "jitter_percentage": 2.5
+    },
+    {
+      "sensor_name": "cam_front_wide",
+      "jitter_percentage": 2.5
+    },
+    {
+      "sensor_name": "cam_left_side",
+      "jitter_percentage": 2.5
+    },
+    {
+      "sensor_name": "cam_right_side",
+      "jitter_percentage": 2.5
+    },
+    {
+      "sensor_name": "cam_rear_wide",
+      "jitter_percentage": 2.5
+    },
+    {
+      "sensor_name": "radar_front_left_corner",
+      "jitter_percentage": 1.5
+    },
+    {
+      "sensor_name": "radar_front_right_corner",
+      "jitter_percentage": 1.5
+    },
+    {
+      "sensor_name": "radar_left_side",
+      "jitter_percentage": 1.5
+    },
+    {
+      "sensor_name": "radar_right_side",
+      "jitter_percentage": 1.5
+    },
+    {
+      "sensor_name": "radar_rear_right_corner",
+      "jitter_percentage": 1.5
+    }
+  ],
   "execution": {
     "thread_pool_size": 8,
     "scheduler": "fifo",
@@ -509,6 +609,12 @@
       "mode": "hybrid",
       "sampled": true,
       "spin_guard_us": 300
+    },
+    "metrics": {
+      "track_deadline_misses": true,
+      "track_staleness": true,
+      "enable_fault_injection": false,
+      "enable_thermal_throttling": false
     }
   },
   "scenarios": [
@@ -550,6 +656,9 @@
                 "id": "sense_1_1_camera_processing",
                 "name": "1.1 Camera processing",
                 "kind": "task",
+                "priority": 50,
+                "preferred_core": -1,
+                "accelerator": "gpu",
                 "execution_times": {
                   "min_ms": 1.2,
                   "avg_ms": 2.3,

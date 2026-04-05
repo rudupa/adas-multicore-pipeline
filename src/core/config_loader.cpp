@@ -210,6 +210,12 @@ void build_stage_config(PipelineConfig& cfg,
             stage.delay_us = times.avg_us;
             stage.delay_us_max = times.max_us;
             stage.glyph = glyph_for_phase(phase.id, phase.name);
+            
+            // ── Priority, affinity, accelerator ────────────────────
+            stage.priority = step_node.value("priority", 50);
+            stage.preferred_core = step_node.value("preferred_core", -1);
+            stage.accelerator = step_node.value("accelerator", std::string(""));
+            
             load_stage_nodes(stage, node_names, step_node);
 
             if (step_node.contains("steps") && step_node["steps"].is_array()) {
@@ -358,6 +364,60 @@ PipelineConfig load_config(const std::string& json_path) {
         }
     }
 
+    // ── Add jitter_percentage to sensors from sensor_jitter config ──
+    if (j.contains("sensor_jitter") && j["sensor_jitter"].is_array()) {
+        for (const auto& jitter_entry : j["sensor_jitter"]) {
+            if (!jitter_entry.is_object()) continue;
+            const std::string sensor_name = jitter_entry.value("sensor_name", std::string());
+            const double jitter_pct = jitter_entry.value("jitter_percentage", 0.0);
+            for (auto& sensor : cfg.sensors) {
+                if (sensor.name == sensor_name) {
+                    sensor.jitter_percentage = jitter_pct;
+                    break;
+                }
+            }
+        }
+    }
+
+    // ── CPU Cores ──────────────────────────────────────────────────
+    if (j.contains("cpu_cores") && j["cpu_cores"].is_array()) {
+        for (const auto& core_entry : j["cpu_cores"]) {
+            if (!core_entry.is_object()) continue;
+            CPUCore core;
+            core.core_id = core_entry.value("core_id", 0);
+            core.freq_ghz = core_entry.value("freq_ghz", 2.0);
+            core.max_tasks = core_entry.value("max_tasks", 4);
+            cfg.cpu_cores.push_back(core);
+        }
+    }
+
+    // ── Accelerators ───────────────────────────────────────────────
+    if (j.contains("accelerators") && j["accelerators"].is_array()) {
+        for (const auto& accel_entry : j["accelerators"]) {
+            if (!accel_entry.is_object()) continue;
+            AcceleratorConfig accel;
+            accel.name = accel_entry.value("name", "gpu");
+            accel.inference_latency_us = accel_entry.value("inference_latency_us", 5000u);
+            accel.max_queue_depth = accel_entry.value("max_queue_depth", 16);
+            accel.bandwidth_mbps = accel_entry.value("bandwidth_mbps", 100.0);
+            accel.scheduling = accel_entry.value("scheduling", "fifo");
+            cfg.accelerators.push_back(accel);
+        }
+    }
+
+    // ── Sensor Jitter Config ───────────────────────────────────────
+    if (j.contains("sensor_jitter_config") && j["sensor_jitter_config"].is_array()) {
+        for (const auto& jitter_cfg : j["sensor_jitter_config"]) {
+            if (!jitter_cfg.is_object()) continue;
+            SensorJitterCfg sj;
+            sj.sensor_name = jitter_cfg.value("sensor_name", "");
+            sj.jitter_percentage = jitter_cfg.value("jitter_percentage", 0.0);
+            sj.enable_dma_interrupt = jitter_cfg.value("enable_dma_interrupt", false);
+            sj.dma_arrival_jitter_us = jitter_cfg.value("dma_arrival_jitter_us", 0u);
+            cfg.sensor_jitters.push_back(sj);
+        }
+    }
+
     // ── Bandwidth ──────────────────────────────────────────────────
     if (j.contains("bandwidth")) {
         auto& bw = j["bandwidth"];
@@ -395,6 +455,15 @@ PipelineConfig load_config(const std::string& json_path) {
             cfg.stage_timing_mode = st.value("mode", cfg.stage_timing_mode);
             cfg.stage_timing_sampled = st.value("sampled", cfg.stage_timing_sampled);
             cfg.stage_spin_guard_us = st.value("spin_guard_us", cfg.stage_spin_guard_us);
+        }
+
+        // Metrics tracking
+        if (ex.contains("metrics") && ex["metrics"].is_object()) {
+            const auto& metrics = ex["metrics"];
+            cfg.track_deadline_misses = metrics.value("track_deadline_misses", true);
+            cfg.track_staleness = metrics.value("track_staleness", true);
+            cfg.enable_fault_injection = metrics.value("enable_fault_injection", false);
+            cfg.enable_thermal_throttling = metrics.value("enable_thermal_throttling", false);
         }
     } else if (j.contains("topology") && j["topology"].is_object()) {
         const auto& topo = j["topology"];
