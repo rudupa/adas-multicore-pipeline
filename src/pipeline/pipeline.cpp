@@ -5,6 +5,7 @@
 #include "sensors/camera_sensor.h"
 #include "sensors/radar_sensor.h"
 #include "sensors/vehicle_state_sensor.h"
+#include "core/task_scheduler.h"
 
 #include <algorithm>
 #include <chrono>
@@ -44,6 +45,15 @@ bool is_allow_overlap_mode(const PipelineConfig& cfg) {
 Pipeline::Pipeline(const PipelineConfig& cfg)
     : cfg_(cfg),
     bw_manager_(cfg.global_bandwidth_limit_mbps, cfg.bandwidth_window_ms) {
+
+    // ── Create task scheduler ──────────────────────────────────────
+    task_scheduler_ = std::make_unique<TaskScheduler>(
+        cfg.cpu_cores.empty() ? cfg.thread_pool_size : cfg.cpu_cores.size(),
+        cfg.central_loop_rate_hz);
+    
+    if (!cfg.cpu_cores.empty()) {
+        task_scheduler_->initialize_cores(cfg.cpu_cores);
+    }
 
     // ── Create sensors from config ─────────────────────────────────
     for (auto& sc : cfg.sensors) {
@@ -186,6 +196,27 @@ void Pipeline::sensor_loop(Sensor* sensor) {
         if (!frame) break;
 
         frame->frame_id = local_frame_id++;
+
+        // ── Apply sensor jitter ────────────────────────────────────
+        // Find jitter config for this sensor
+        double jitter_pct = 0.0;
+        for (const auto& sensor_cfg : cfg_.sensors) {
+            if (sensor_cfg.name == sensor->name()) {
+                jitter_pct = sensor_cfg.jitter_percentage;
+                break;
+            }
+        }
+        
+        if (jitter_pct > 0.0) {
+            // Apply jitter to frame timing
+            uint32_t frame_time_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                frame->created_at.time_since_epoch()).count();
+            uint32_t jittered_time_us = JitterSimulator::apply_jitter(frame_time_us, jitter_pct);
+            auto jitter_duration = std::chrono::microseconds(jittered_time_us - frame_time_us);
+            if (jitter_duration.count() > 0) {
+                std::this_thread::sleep_for(jitter_duration);
+            }
+        }
 
         // Visualize: short marker for frame creation (not the FPS sleep)
         visualizer_.record_event(sensor->name(), frame->created_at,
@@ -378,6 +409,32 @@ void Pipeline::run_stage(PipelineStage& stage, std::shared_ptr<Frame>& frame, bo
 
     auto stage_end = Clock::now();
     auto stage_dur = std::chrono::duration_cast<Duration>(stage_end - stage_start);
+    
+    // ── Deadline tracking (if enabled) ─────────────────────────────
+    if (cfg_.track_deadline_misses) {
+        // Find the stage config to get expected timing and priority
+        const StageConfig* stage_cfg = nullptr;
+        for (const auto& sc : cfg_.stages) {
+            if (sc.id == stage.name() || sc.name == stage.name()) {
+                stage_cfg = &sc;
+                break;
+            }
+        }
+        
+        if (stage_cfg) {
+            // Expected deadline: stage's avg execution time + some margin (10%)
+            uint32_t expected_us = static_cast<uint32_t>(stage_cfg->delay_us * 1.1);
+            uint32_t actual_us = static_cast<uint32_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(stage_dur).count());
+            
+            if (actual_us > expected_us) {
+                // Deadline miss detected
+                metrics_.record_deadline_miss(frame->frame_id, stage.name(), actual_us, expected_us);
+                task_scheduler_->check_deadlines();
+            }
+        }
+    }
+    
     if (collect_metrics) {
         metrics_.record_stage_time(frame->frame_id, stage.name(), stage_dur);
     }

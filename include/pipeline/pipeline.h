@@ -3,6 +3,7 @@
 #include "core/bandwidth_manager.h"
 #include "core/concurrent_queue.h"
 #include "core/config_loader.h"
+#include "core/task_scheduler.h"
 #include "core/thread_pool.h"
 #include "core/types.h"
 #include "metrics/metrics_collector.h"
@@ -48,6 +49,9 @@ public:
 
     TimelineVisualizer&       visualizer()       { return visualizer_; }
     const TimelineVisualizer& visualizer() const { return visualizer_; }
+    
+    TaskScheduler&       task_scheduler()       { return *task_scheduler_; }
+    const TaskScheduler& task_scheduler() const { return *task_scheduler_; }
 
 private:
     static constexpr uint64_t kNoActiveCycle = std::numeric_limits<uint64_t>::max();
@@ -69,6 +73,7 @@ private:
     std::vector<std::unique_ptr<Sensor>>        sensors_;
     std::vector<std::unique_ptr<PipelineStage>> stages_;
     std::unique_ptr<Scheduler>                  scheduler_;
+    std::unique_ptr<TaskScheduler>              task_scheduler_;
     std::unique_ptr<ThreadPool>                 pool_;
     BandwidthManager                            bw_manager_;
     MetricsCollector                            metrics_;

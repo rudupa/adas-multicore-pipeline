@@ -30,6 +30,10 @@ public:
 
     /// Record that a frame was dropped (bandwidth throttle, queue full, etc.).
     void record_frame_drop(const std::string& sensor);
+    
+    /// Record a deadline miss for a stage (actual > expected execution time)
+    void record_deadline_miss(uint64_t frame_id, const std::string& stage_name,
+                             uint32_t actual_us, uint32_t expected_us);
 
     /// Print a summary of all collected metrics to stdout.
     void print_summary() const;
@@ -42,6 +46,9 @@ public:
 
     /// Access the total number of dropped frames.
     uint64_t total_drops() const;
+    
+    /// Access the total number of deadline misses.
+    uint64_t total_deadline_misses() const;
 
     /// Reset all counters.
     void reset();
@@ -54,12 +61,14 @@ private:
         bool        completed = false;
         std::map<std::string, double> stage_us;   // stage → processing µs
         std::map<std::string, double> queue_us;   // stage → queue-wait µs
+        std::map<std::string, bool> deadline_miss;  // stage → deadline miss flag
     };
 
     mutable std::mutex                    mutex_;
     std::map<uint64_t, FrameRecord>       frames_;
     std::map<std::string, uint64_t>       drops_;     // sensor → count
     uint64_t                              total_completed_ = 0;
+    uint64_t                              total_deadline_misses_ = 0;
 };
 
 } // namespace adas

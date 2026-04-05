@@ -76,6 +76,7 @@ set(CORE_SOURCES
     src/core/thread_pool.cpp
     src/core/bandwidth_manager.cpp
     src/core/config_loader.cpp
+    src/core/task_scheduler.cpp
 )
 
 set(SENSOR_SOURCES

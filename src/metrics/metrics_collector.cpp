@@ -44,6 +44,15 @@ void MetricsCollector::record_frame_drop(const std::string& sensor) {
     drops_[sensor]++;
 }
 
+void MetricsCollector::record_deadline_miss(uint64_t frame_id, 
+                                           const std::string& stage_name,
+                                           uint32_t actual_us,
+                                           uint32_t expected_us) {
+    std::lock_guard lock(mutex_);
+    frames_[frame_id].deadline_miss[stage_name] = true;
+    ++total_deadline_misses_;
+}
+
 void MetricsCollector::print_periodic_update() const {
     std::lock_guard lock(mutex_);
     uint64_t total_drops = 0;
@@ -68,6 +77,11 @@ uint64_t MetricsCollector::total_drops() const {
     return total_drops;
 }
 
+uint64_t MetricsCollector::total_deadline_misses() const {
+    std::lock_guard lock(mutex_);
+    return total_deadline_misses_;
+}
+
 void MetricsCollector::print_summary() const {
     std::lock_guard lock(mutex_);
 
@@ -86,6 +100,12 @@ void MetricsCollector::print_summary() const {
     }
     std::printf("Total frames dropped : %llu\n",
                 static_cast<unsigned long long>(total_drops));
+
+    // Deadline misses
+    if (total_deadline_misses_ > 0) {
+        std::printf("Deadline misses      : %llu\n",
+                    static_cast<unsigned long long>(total_deadline_misses_));
+    }
 
     // End-to-end latency
     std::vector<double> e2e_us;
@@ -146,6 +166,7 @@ void MetricsCollector::reset() {
     frames_.clear();
     drops_.clear();
     total_completed_ = 0;
+    total_deadline_misses_ = 0;
 }
 
 } // namespace adas
