@@ -1,0 +1,79 @@
+{
+  "_comment": "ECU compute profiles for the ADAS pipeline viewer. Each profile can override stage processing delays, global bandwidth, and thread-pool size. Load via 'Load profile overrides' in the Simulator Controls panel.",
+  "profiles": [
+    {
+      "id": "nominal",
+      "label": "Nominal",
+      "stage_delay_scale": 1.0,
+      "global_bandwidth_scale": 1.0,
+      "thread_pool_size": 0,
+      "_note": "Baseline operation. All sensors active, default BW budget, default thread pool."
+    },
+    {
+      "id": "bw_congested",
+      "label": "BW Congested (35% limit)",
+      "stage_delay_scale": 1.0,
+      "global_bandwidth_scale": 0.35,
+      "thread_pool_size": 4,
+      "_note": "Global ingress budget cut to 35%. Cameras will be throttled waiting for BW window. Expect heavy BW-throttle events on all camera lanes."
+    },
+    {
+      "id": "bw_critical",
+      "label": "BW Critical (12% limit)",
+      "stage_delay_scale": 1.1,
+      "global_bandwidth_scale": 0.12,
+      "thread_pool_size": 4,
+      "_note": "Severe BW starvation — only 12% of nominal budget available. Nearly every camera frame will be throttled, causing visible stall gaps in the timeline."
+    },
+    {
+      "id": "overloaded_ecu",
+      "label": "Overloaded ECU (4x delay, 2 threads)",
+      "stage_delay_scale": 4.0,
+      "global_bandwidth_scale": 1.0,
+      "thread_pool_size": 2,
+      "_note": "Normal sensor delivery but ECU is 4x slower with only 2 worker threads. Processing queue backs up — expect frame drops as queue capacity is exhausted."
+    },
+    {
+      "id": "worst_case",
+      "label": "Worst Case (BW + ECU stress)",
+      "stage_delay_scale": 2.5,
+      "global_bandwidth_scale": 0.20,
+      "thread_pool_size": 2,
+      "_note": "Combined stress: BW reduced to 20% causing heavy throttle AND ECU 2.5x slower with 2 threads causing queue saturation. Expect both BW-throttle events and frame drops."
+    },
+    {
+      "id": "performance",
+      "label": "Performance (fast ECU, full BW)",
+      "stage_delay_scale": 0.65,
+      "global_bandwidth_scale": 1.5,
+      "thread_pool_size": 12,
+      "_note": "High-compute profile: ECU stages run 35% faster, BW budget 50% higher, 12 worker threads. Low latency, near-zero throttle, minimal drops."
+    },
+    {
+      "id": "rt_boost",
+      "label": "RT Boost (very fast ECU)",
+      "stage_delay_scale": 0.45,
+      "global_bandwidth_scale": 1.8,
+      "thread_pool_size": 16,
+      "_note": "Aggressive real-time boost. ECU delays reduced by 55%, BW budget +80%, 16 workers. Intended to reduce missed cycles under skip-if-active mode."
+    },
+    {
+      "id": "rt_extreme",
+      "label": "RT Extreme (max throughput)",
+      "stage_delay_scale": 0.35,
+      "global_bandwidth_scale": 2.2,
+      "thread_pool_size": 24,
+      "_note": "Maximum performance profile. ECU delays reduced by 65%, BW budget +120%, 24 workers. Use for stress-testing low-latency and minimizing cycle misses."
+    },
+    {
+      "id": "zero_miss_50hz",
+      "label": "Zero Miss (Guaranteed)",
+      "stage_delay_scale": 0.22,
+      "global_bandwidth_scale": 3.0,
+      "thread_pool_size": 32,
+      "central_loop_rate_hz": 35.0,
+      "central_cycle_mode": "skip_if_active",
+      "_note": "Guaranteed-style profile for near-zero missed cycles in Skip new if active mode. Aggressively reduces ECU delay, increases BW and threads, and lowers loop rate to 35 Hz for deterministic headroom."
+    }
+  ]
+}

@@ -9,23 +9,10 @@
 
 namespace adas {
 
-/// Records timestamped events across the pipeline and renders them as
-/// text-based timing diagrams.
+/// Records timestamped events across the pipeline for visualization.
 ///
-/// Each "lane" is a named row in the diagram (sensor, stage, thread).
-/// Events are spans with a start/end time, rendered as character blocks.
-///
-/// Example output:
-///
-///   Time(ms)        0    5   10   15   20   25   30   35   40
-///   front_camera    ████░░░░████░░░░████░░░░████░░░░████░░░░
-///   front_radar     ██████░░░░░░██████░░░░░░██████░░░░░░████
-///   preprocess      ░░██░░██░░██░░██░░██░░██░░██░░██░░██░░██
-///   detection       ░░░░████░░░░████░░░░████░░░░████░░░░████
-///   tracking        ░░░░░░██░░░░░░██░░░░░░██░░░░░░██░░░░░░██
-///   BW-throttle     ░░░░░░░░░░░░░░░░░░▓▓░░░░░░░░░░░░░░▓▓░░
-///   frame-drop      ░░░░░░░░░░░░░░░░░░░░X░░░░░░░░░░░░░░X░░
-///
+/// This buffer is consumed by the desktop GUI viewer (ImGui + ImPlot).
+/// Each "lane" is a named row (sensor, stage, bandwidth, drop).
 class TimelineVisualizer {
 public:
     /// One span of activity on a named lane.
@@ -35,6 +22,7 @@ public:
         TimePoint   end;
         char        glyph = '#';   // character used to render the span
         uint64_t    frame_id = 0;  // optional association
+        std::string source;        // originating sensor/stream
     };
 
     /// Instantaneous marker (drop, throttle hit, etc.).
@@ -42,6 +30,9 @@ public:
         std::string lane;
         TimePoint   time;
         char        glyph = 'X';
+        uint64_t    frame_id = 0;
+        std::string source;
+        std::string detail;
     };
 
     /// Immutable copy of current visualization buffers.
@@ -57,33 +48,17 @@ public:
     /// Record a span event (e.g. stage processing, sensor generation).
     void record_event(const std::string& lane, TimePoint start,
                       TimePoint end, char glyph = '#',
-                      uint64_t frame_id = 0);
+                      uint64_t frame_id = 0,
+                      const std::string& source = {});
 
     /// Record an instantaneous marker (e.g. frame drop).
     void record_marker(const std::string& lane, TimePoint time,
-                       char glyph = 'X');
+                       char glyph = 'X', uint64_t frame_id = 0,
+                       const std::string& source = {},
+                       const std::string& detail = {});
 
     /// Set the global reference time (usually pipeline start).
     void set_origin(TimePoint origin);
-
-    // ── Rendering ──────────────────────────────────────────────────
-
-    /// Render the full timeline to a string.
-    /// @param width_chars  Total width of the diagram body (default 120).
-    /// @param time_window_ms  How many ms to render (0 = auto-fit).
-    std::string render(int width_chars = 120,
-                       double time_window_ms = 0.0) const;
-
-    /// Render and print to stdout.
-    void print(int width_chars = 120,
-               double time_window_ms = 0.0) const;
-
-    /// Render the first N frames as a compact per-frame waterfall.
-    std::string render_waterfall(size_t max_frames = 20,
-                                 int width_chars = 100) const;
-
-    void print_waterfall(size_t max_frames = 20,
-                         int width_chars = 100) const;
 
     /// Return a consistent point-in-time copy of all lanes/events.
     Snapshot snapshot() const;

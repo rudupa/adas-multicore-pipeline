@@ -24,6 +24,7 @@ inline double to_us(Duration d) {
 enum class SensorType : uint8_t {
     Camera = 0,
     Radar,
+    VehicleState,
     Lidar,   // TODO: implement LidarSensor
     Count
 };
@@ -32,6 +33,7 @@ inline const char* sensor_type_name(SensorType t) {
     switch (t) {
         case SensorType::Camera: return "camera";
         case SensorType::Radar:  return "radar";
+        case SensorType::VehicleState: return "vehicle_state";
         case SensorType::Lidar:  return "lidar";
         default:                 return "unknown";
     }

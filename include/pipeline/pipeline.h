@@ -12,7 +12,10 @@
 #include "sensors/sensor.h"
 
 #include <atomic>
+#include <condition_variable>
+#include <limits>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -47,11 +50,20 @@ public:
     const TimelineVisualizer& visualizer() const { return visualizer_; }
 
 private:
+    static constexpr uint64_t kNoActiveCycle = std::numeric_limits<uint64_t>::max();
+
     // Sensor producer loop (one per sensor, runs on its own thread).
     void sensor_loop(Sensor* sensor);
 
-    // Process a single frame through all pipeline stages sequentially.
-    void process_frame(std::shared_ptr<Frame> frame);
+    void central_loop();
+    void process_camera_frame(std::shared_ptr<Frame> frame);
+    void process_radar_frame(std::shared_ptr<Frame> frame);
+    void process_central_cycle(std::shared_ptr<Frame> frame);
+    void run_stage(PipelineStage& stage, std::shared_ptr<Frame>& frame, bool collect_metrics);
+    PipelineStage* find_stage_by_id(const std::string& stage_id);
+    bool is_camera_sensor(const Sensor& sensor) const;
+    bool is_radar_sensor(const Sensor& sensor) const;
+    bool is_vehicle_state_sensor(const Sensor& sensor) const;
 
     PipelineConfig                              cfg_;
     std::vector<std::unique_ptr<Sensor>>        sensors_;
@@ -62,16 +74,20 @@ private:
     MetricsCollector                            metrics_;
     TimelineVisualizer                          visualizer_;
 
-    // Inter-stage queue (sensor → first stage entrance)
-    ConcurrentQueue<std::shared_ptr<Frame>>     ingress_queue_;
-
     std::vector<std::thread>                    sensor_threads_;
-    std::thread                                 dispatcher_thread_;
+    std::thread                                 central_loop_thread_;
+    std::thread                                 scheduler_consumer_thread_;
     std::thread                                 metrics_thread_;
     std::atomic<bool>                           running_{false};
 
-    // Global monotonic frame-id counter (across all sensors)
-    std::atomic<uint64_t>                       global_frame_id_{0};
+    // Central/world cycle counter.
+    std::atomic<uint64_t>                       world_frame_id_{0};
+    std::atomic<uint64_t>                       active_world_cycle_id_{kNoActiveCycle};
+
+    std::mutex                                  sensor_state_mutex_;
+    uint64_t                                    latest_camera_output_id_{0};
+    uint64_t                                    latest_radar_output_id_{0};
+    uint64_t                                    latest_vehicle_state_id_{0};
 };
 
 } // namespace adas

@@ -3,6 +3,7 @@
 #include "core/types.h"
 #include <atomic>
 #include <chrono>
+#include <map>
 #include <mutex>
 #include <string>
 
@@ -32,14 +33,25 @@ public:
     /// Query current utilisation (bytes transferred in current window).
     size_t current_usage_bytes() const;
 
+    /// Query per-sensor utilisation (bytes transferred in sensor window).
+    size_t current_usage_bytes(const std::string& sensor_name) const;
+
 private:
+    struct SensorWindowState {
+        TimePoint window_start;
+        size_t    bytes_in_window = 0;
+    };
+
     void advance_window();
+    void advance_sensor_window(SensorWindowState& state, TimePoint now);
+    uint64_t remaining_window_us(TimePoint window_start, TimePoint now) const;
 
     mutable std::mutex mutex_;
     double             global_limit_bytes_per_window_;
     uint32_t           window_ms_;
     TimePoint          window_start_;
     size_t             bytes_in_window_ = 0;
+    std::map<std::string, SensorWindowState> sensor_windows_;
 };
 
 } // namespace adas

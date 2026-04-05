@@ -54,6 +54,20 @@ void MetricsCollector::print_periodic_update() const {
                 frames_.size());
 }
 
+uint64_t MetricsCollector::total_completed() const {
+    std::lock_guard lock(mutex_);
+    return total_completed_;
+}
+
+uint64_t MetricsCollector::total_drops() const {
+    std::lock_guard lock(mutex_);
+    uint64_t total_drops = 0;
+    for (const auto& [sensor, count] : drops_) {
+        total_drops += count;
+    }
+    return total_drops;
+}
+
 void MetricsCollector::print_summary() const {
     std::lock_guard lock(mutex_);
 

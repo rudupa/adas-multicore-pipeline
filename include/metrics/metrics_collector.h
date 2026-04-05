@@ -37,6 +37,12 @@ public:
     /// Print a compact single-line periodic update.
     void print_periodic_update() const;
 
+    /// Access the total number of completed frames.
+    uint64_t total_completed() const;
+
+    /// Access the total number of dropped frames.
+    uint64_t total_drops() const;
+
     /// Reset all counters.
     void reset();
 

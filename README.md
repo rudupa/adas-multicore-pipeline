@@ -1,6 +1,6 @@
 # ADAS Multicore Pipeline Simulator
 
-A configurable C++17 simulation of a real-time **Advanced Driver Assistance System (ADAS)** compute pipeline with multicore execution, bandwidth management, and performance profiling.
+A configurable C++17 simulation of a real-time **Advanced Driver Assistance System (ADAS)** sense-plan-act compute pipeline with multicore execution, bandwidth management, and performance profiling.
 
 > **Note:** This project does *not* include real AI/ML models. It simulates system-level behaviour — scheduling, latency, throughput, and bandwidth constraints — to support architecture exploration and performance analysis.
 
@@ -10,7 +10,7 @@ A configurable C++17 simulation of a real-time **Advanced Driver Assistance Syst
 |------|---------|
 | **Sensors** | Pluggable sensor framework (Camera, Radar); extensible to Lidar and others |
 | **Bandwidth** | Global and per-sensor bandwidth caps with frame dropping on overload |
-| **Pipeline** | Three-stage pipeline: Preprocess → Detection → Tracking (all configurable) |
+| **Pipeline** | Config-driven Sense → Plan → Act pipeline with executable stage groups and sub-steps |
 | **Multicore** | Thread pool with configurable worker count |
 | **Scheduling** | Pluggable scheduler interface; ships with FIFO (priority & deadline TODOs) |
 | **Metrics** | End-to-end latency, per-stage time, queue wait time, drop counts |
@@ -21,19 +21,22 @@ A configurable C++17 simulation of a real-time **Advanced Driver Assistance Syst
 ```
 ├── CMakeLists.txt
 ├── config/
-│   └── pipeline_config.json
+│   └── adas_pipeline_config.json
 ├── include/
 │   ├── core/          # Types, thread pool, concurrent queue, bandwidth manager, config
 │   ├── sensors/       # Sensor interface + Camera / Radar implementations
 │   ├── pipeline/      # Pipeline stage interface + stages + orchestrator
 │   ├── scheduler/     # Scheduler interface + FIFO implementation
-│   └── metrics/       # Metrics collector
+│   ├── metrics/       # Metrics collector
+│   └── visualization/ # Timeline event buffer consumed by GUI viewer
 └── src/
     ├── core/
     ├── sensors/
     ├── pipeline/
     ├── scheduler/
     ├── metrics/
+    ├── visualization/
+    ├── viewer/
     └── main.cpp
 ```
 
@@ -47,7 +50,7 @@ cmake --build build --config Release
 ## Running
 
 ```bash
-# Uses default config at config/pipeline_config.json
+# Uses default config at config/adas_pipeline_config.json
 ./build/adas_pipeline
 
 # Or specify a custom config
@@ -78,29 +81,84 @@ Run:
 ```
 
 Viewer features:
-- live lane-based timeline plot (sensor/stage/throttle/drop)
+- live lane-based timeline plot (sensor/sense-plan-act stage/throttle/drop)
 - per-second throughput chart (frames/sec)
-- controls for timeline window and auto-scroll
+- left-side phase treeview with min/avg/max step execution times and configured sub-steps
+- cycle count and drop/throttle counters
+- larger UI font and auto-aligned windows
+- zoom/scroll controls for timeline inspection (wheel/pinch + pan)
 
 ## Configuration
 
-Edit `config/pipeline_config.json`:
+Default runtime config: `config/adas_pipeline_config.json`
 
-```jsonc
-{
-  "sensors": [
-    { "type": "camera", "name": "front_camera", "fps": 30, "frame_size_bytes": 2073600, "bandwidth_limit_mbps": 100.0 },
-    { "type": "radar",  "name": "front_radar",  "fps": 20, "frame_size_bytes": 8192,    "bandwidth_limit_mbps": 10.0 }
-  ],
-  "bandwidth": { "global_limit_mbps": 200.0, "window_duration_ms": 1000 },
-  "pipeline": { "preprocess_delay_us": 500, "detection_delay_us": 2000, "tracking_delay_us": 1000, "queue_capacity": 64 },
-  "execution": { "thread_pool_size": 4, "scheduler": "fifo", "run_duration_seconds": 5 }
-}
-```
+This runtime config describes:
+
+- 6 camera streams, 5 smart radars, and vehicle-state inputs
+- camera ingress, radar ingress, and central ECU topology
+- per-sensor camera/radar pipelines with vehicle-state inputs
+- fixed-rate central loop for fusion, planning, and control
+- scenario-level timing for each executable stage
+
+Additional architecture-level example:
+
+- [config/adas_pipeline_config.json](config/adas_pipeline_config.json) — 6 cameras, 5 radars, vehicle-state inputs, ingress links, and a central ECU pipeline for fusion/planning/control
 
 ## Documentation
 
-- [ADAS Pipeline Architecture & Timing Visualization](docs/system/ADAS_Pipeline.md)
+- [ADAS Pipeline Architecture](docs/system/ADAS_Pipeline.md)
+
+## Mermaid Generator Tool
+
+Generate Mermaid diagrams from ADAS config (`adas_pipeline_config.json`):
+
+```bash
+python tools/generate_mermaid.py \
+  --input config/adas_pipeline_config.json \
+  --output docs/system/ADAS_Pipeline_generated.md \
+  --scenario-id adas_realtime_distributed
+```
+
+Generate standalone Mermaid files (`.mmd`) for Mermaid Live Editor:
+
+```bash
+python tools/generate_mermaid.py \
+  --input config/adas_pipeline_config.json \
+  --output docs/system/adas_pipeline \
+  --scenario-id adas_realtime_distributed \
+  --format mmd
+```
+
+This emits:
+- `docs/system/adas_pipeline_pipeline.mmd`
+- `docs/system/adas_pipeline_topology.mmd`
+
+Tool location:
+- [tools/generate_mermaid.py](tools/generate_mermaid.py)
+
+## System Config GUI Tool (Real-time JSON + Mermaid)
+
+This repo includes a lightweight GUI to edit the **ADAS schema** config and generate `system_config.json` in real time (with a live preview).
+
+Install:
+
+```bash
+python -m pip install -r tools/requirements_gui.txt
+```
+
+Run:
+
+```bash
+python tools/system_config_gui.py
+```
+
+By default it writes:
+
+- `config/system_config.json`
+
+Tool location:
+
+- [tools/system_config_gui.py](tools/system_config_gui.py)
 
 ## Extension Points (TODOs)
 

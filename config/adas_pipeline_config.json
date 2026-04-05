@@ -1,0 +1,797 @@
+{
+  "schema_version": "v2",
+  "name": "adas_distributed_6cam_5radar",
+  "system": {
+    "name": "adas_reference_6cam_5radar_split_ecu",
+    "description": "Real-time ADAS execution architecture with 6 cameras, 5 radars, vehicle-state inputs, and a central compute ECU running the shared fusion, planning, and control loop.",
+    "clock_sync": {
+      "time_base": "PTP",
+      "sensor_timestamping": true,
+      "vehicle_state_sync": true
+    },
+    "vehicle_network": {
+      "backbone": "Automotive Ethernet",
+      "control_bus": "CAN-FD"
+    }
+  },
+  "sensors": {
+    "cameras": [
+      {
+        "name": "cam_front_narrow",
+        "short_name": "CAM_FC_N",
+        "position": "front_windshield_center_narrow",
+        "type": "camera",
+        "smart": false,
+        "output": {
+          "format": "RAW12",
+          "resolution": "1920x1080",
+          "frame_size_bytes": 3110400
+        },
+        "interface": "GMSL2",
+        "bandwidth_mbps": 1500,
+        "sampling_rate_hz": 30,
+        "destination_ecu": "compute_ecu_main",
+        "pipeline": []
+      },
+      {
+        "name": "cam_front_wide",
+        "short_name": "CAM_FC_W",
+        "position": "front_windshield_center_wide",
+        "type": "camera",
+        "smart": false,
+        "output": {
+          "format": "RAW12",
+          "resolution": "1920x1080",
+          "frame_size_bytes": 3110400
+        },
+        "interface": "GMSL2",
+        "bandwidth_mbps": 1500,
+        "sampling_rate_hz": 30,
+        "destination_ecu": "compute_ecu_main",
+        "pipeline": []
+      },
+      {
+        "name": "cam_left_front",
+        "short_name": "CAM_FL",
+        "position": "left_fender_front",
+        "type": "camera",
+        "smart": false,
+        "output": {
+          "format": "RAW12",
+          "resolution": "1920x1080",
+          "frame_size_bytes": 3110400
+        },
+        "interface": "GMSL2",
+        "bandwidth_mbps": 1500,
+        "sampling_rate_hz": 30,
+        "destination_ecu": "compute_ecu_main",
+        "pipeline": []
+      },
+      {
+        "name": "cam_right_front",
+        "short_name": "CAM_FR",
+        "position": "right_fender_front",
+        "type": "camera",
+        "smart": false,
+        "output": {
+          "format": "RAW12",
+          "resolution": "1920x1080",
+          "frame_size_bytes": 3110400
+        },
+        "interface": "GMSL2",
+        "bandwidth_mbps": 1500,
+        "sampling_rate_hz": 30,
+        "destination_ecu": "compute_ecu_main",
+        "pipeline": []
+      },
+      {
+        "name": "cam_left_rear",
+        "short_name": "CAM_RL",
+        "position": "left_rear_quarter",
+        "type": "camera",
+        "smart": false,
+        "output": {
+          "format": "RAW12",
+          "resolution": "1920x1080",
+          "frame_size_bytes": 3110400
+        },
+        "interface": "GMSL2",
+        "bandwidth_mbps": 1500,
+        "sampling_rate_hz": 30,
+        "destination_ecu": "compute_ecu_main",
+        "pipeline": []
+      },
+      {
+        "name": "cam_rear",
+        "short_name": "CAM_RC",
+        "position": "rear_tailgate_center",
+        "type": "camera",
+        "smart": false,
+        "output": {
+          "format": "RAW12",
+          "resolution": "1920x1080",
+          "frame_size_bytes": 3110400
+        },
+        "interface": "GMSL2",
+        "bandwidth_mbps": 1500,
+        "sampling_rate_hz": 30,
+        "destination_ecu": "compute_ecu_main",
+        "pipeline": []
+      }
+    ],
+    "radars": [
+      {
+        "name": "radar_front_long",
+        "short_name": "RAD_FC",
+        "position": "front_grille_center",
+        "type": "radar",
+        "smart": true,
+        "output": {
+          "format": "tracked_objects",
+          "resolution": "range_azimuth_doppler_targets",
+          "frame_size_bytes": 32768
+        },
+        "interface": "Automotive Ethernet",
+        "bandwidth_mbps": 100,
+        "sampling_rate_hz": 20,
+        "destination_ecu": "compute_ecu_main",
+        "pipeline": [
+          "signal_processing",
+          "cfar_detection",
+          "clustering",
+          "ego_motion_compensation",
+          "radar_tracking"
+        ]
+      },
+      {
+        "name": "radar_front_left_corner",
+        "short_name": "RAD_FL",
+        "position": "front_bumper_left_corner",
+        "type": "radar",
+        "smart": true,
+        "output": {
+          "format": "tracked_objects",
+          "resolution": "range_azimuth_doppler_targets",
+          "frame_size_bytes": 24576
+        },
+        "interface": "Automotive Ethernet",
+        "bandwidth_mbps": 100,
+        "sampling_rate_hz": 20,
+        "destination_ecu": "compute_ecu_main",
+        "pipeline": [
+          "signal_processing",
+          "cfar_detection",
+          "clustering",
+          "ego_motion_compensation",
+          "radar_tracking"
+        ]
+      },
+      {
+        "name": "radar_front_right_corner",
+        "short_name": "RAD_FR",
+        "position": "front_bumper_right_corner",
+        "type": "radar",
+        "smart": true,
+        "output": {
+          "format": "tracked_objects",
+          "resolution": "range_azimuth_doppler_targets",
+          "frame_size_bytes": 24576
+        },
+        "interface": "Automotive Ethernet",
+        "bandwidth_mbps": 100,
+        "sampling_rate_hz": 20,
+        "destination_ecu": "compute_ecu_main",
+        "pipeline": [
+          "signal_processing",
+          "cfar_detection",
+          "clustering",
+          "ego_motion_compensation",
+          "radar_tracking"
+        ]
+      },
+      {
+        "name": "radar_rear_left_corner",
+        "short_name": "RAD_RL",
+        "position": "rear_bumper_left_corner",
+        "type": "radar",
+        "smart": true,
+        "output": {
+          "format": "tracked_objects",
+          "resolution": "range_azimuth_doppler_targets",
+          "frame_size_bytes": 24576
+        },
+        "interface": "Automotive Ethernet",
+        "bandwidth_mbps": 100,
+        "sampling_rate_hz": 20,
+        "destination_ecu": "compute_ecu_main",
+        "pipeline": [
+          "signal_processing",
+          "cfar_detection",
+          "clustering",
+          "ego_motion_compensation",
+          "radar_tracking"
+        ]
+      },
+      {
+        "name": "radar_rear_right_corner",
+        "short_name": "RAD_RR",
+        "position": "rear_bumper_right_corner",
+        "type": "radar",
+        "smart": true,
+        "output": {
+          "format": "tracked_objects",
+          "resolution": "range_azimuth_doppler_targets",
+          "frame_size_bytes": 24576
+        },
+        "interface": "Automotive Ethernet",
+        "bandwidth_mbps": 100,
+        "sampling_rate_hz": 20,
+        "destination_ecu": "compute_ecu_main",
+        "pipeline": [
+          "signal_processing",
+          "cfar_detection",
+          "clustering",
+          "ego_motion_compensation",
+          "radar_tracking"
+        ]
+      }
+    ],
+    "vehicle_state_inputs": [
+      {
+        "name": "imu",
+        "short_name": "VS_IMU",
+        "type": "vehicle_state",
+        "sampling_rate_hz": 200,
+        "frame_size_bytes": 128,
+        "bandwidth_mbps": 5,
+        "interface": "SPI",
+        "destination_ecu": "compute_ecu_main"
+      },
+      {
+        "name": "wheel_odometry",
+        "short_name": "VS_WHEEL",
+        "type": "vehicle_state",
+        "sampling_rate_hz": 100,
+        "frame_size_bytes": 128,
+        "bandwidth_mbps": 2,
+        "interface": "CAN-FD",
+        "destination_ecu": "compute_ecu_main"
+      },
+      {
+        "name": "gnss",
+        "short_name": "VS_GNSS",
+        "type": "vehicle_state",
+        "sampling_rate_hz": 10,
+        "frame_size_bytes": 256,
+        "bandwidth_mbps": 1,
+        "interface": "Automotive Ethernet",
+        "destination_ecu": "compute_ecu_main"
+      }
+    ]
+  },
+  "ecus": [
+    {
+      "name": "compute_ecu_main",
+      "role": "central_compute_ecu",
+      "hosts": [
+        "all_6_cameras",
+        "all_radar_outputs",
+        "imu",
+        "wheel_odometry",
+        "gnss"
+      ],
+      "responsibilities": [
+        "time_sync_and_snapshot_build",
+        "camera_preprocessing",
+        "object_detection",
+        "lane_and_road_detection",
+        "semantic_segmentation",
+        "depth_estimation_optional",
+        "camera_tracking_optional",
+        "fusion_spatial_alignment",
+        "fusion_temporal_alignment",
+        "fusion_data_association",
+        "fusion_state_fusion",
+        "fusion_track_management",
+        "environment_model_build",
+        "ego_motion_estimation",
+        "gnss_integration",
+        "map_matching",
+        "pose_estimation",
+        "prediction_input_aggregation",
+        "kinematic_prediction",
+        "interaction_prediction",
+        "uncertainty_modeling",
+        "behavior_planning",
+        "trajectory_planning"
+      ]
+    }
+  ],
+  "real_time_execution_view": {
+    "sense": {
+      "1.1_camera_processing": {
+        "execution_model": "parallel_per_camera_plus_pipelined_over_frames",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "1.1.1_preprocessing",
+          "1.1.2_object_detection",
+          "1.1.3_lane_and_road_detection",
+          "1.1.4_semantic_segmentation",
+          "1.1.5_depth_estimation_optional",
+          "1.1.6_camera_tracking_optional"
+        ]
+      },
+      "1.2_radar_processing": {
+        "execution_model": "sequential_per_radar_cycle_parallel_across_radars",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "1.2.1_signal_processing",
+          "1.2.2_cfar_detection",
+          "1.2.3_clustering",
+          "1.2.4_ego_motion_compensation",
+          "1.2.5_radar_tracking"
+        ]
+      },
+      "1.3_sensor_acquisition": {
+        "execution_model": "parallel",
+        "sub_steps": [
+          "1.3.1_camera_capture",
+          "1.3.2_radar_capture",
+          "1.3.3_vehicle_state_capture",
+          "1.3.4_time_sync_on_consume"
+        ],
+        "placement": {
+          "camera_capture": "camera_devices_to_camera_ingress",
+          "radar_capture": "radar_devices_to_radar_ingress",
+          "vehicle_state_capture": "compute_ecu_main",
+          "time_sync_on_consume": "compute_ecu_main"
+        }
+      },
+      "1.4_fusion": {
+        "execution_model": "periodic_snapshot_based",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "1.4.1_spatial_alignment",
+          "1.4.2_temporal_alignment",
+          "1.4.3_data_association",
+          "1.4.4_state_fusion",
+          "1.4.5_track_management",
+          "1.4.6_environment_model"
+        ]
+      },
+      "1.5_localization": {
+        "execution_model": "continuous_high_rate_with_lower_rate_gnss",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "1.5.1_ego_motion_estimation",
+          "1.5.2_gnss_integration",
+          "1.5.3_map_matching",
+          "1.5.4_pose_estimation"
+        ]
+      },
+      "1.6_world_map_build": {
+        "execution_model": "serial_per_cycle",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "1.6.1_grid_update",
+          "1.6.2_semantic_layer_fusion",
+          "1.6.3_drivable_area_update"
+        ]
+      }
+    },
+    "plan": {
+      "2.1_prediction": {
+        "execution_model": "periodic_per_planning_cycle",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "2.1.1_input_aggregation",
+          "2.1.2_kinematic_prediction",
+          "2.1.3_interaction_prediction",
+          "2.1.4_uncertainty_modeling",
+          "2.1.5_predicted_trajectories"
+        ]
+      },
+      "2.2_behavior_planning": {
+        "execution_model": "sequential_decision_step",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "2.2.1_situation_assessment",
+          "2.2.2_rule_evaluation",
+          "2.2.3_risk_assessment",
+          "2.2.4_maneuver_selection",
+          "2.2.5_goal_setting"
+        ]
+      },
+      "2.3_trajectory_planning": {
+        "execution_model": "optimization_loop",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "2.3.1_constraints_setup",
+          "2.3.2_path_planning",
+          "2.3.3_speed_planning",
+          "2.3.4_coupled_optimization",
+          "2.3.5_final_trajectory",
+          "2.3.6_trajectory_plausibility_check"
+        ]
+      },
+      "2.4_trajectory_plausibility_check": {
+        "execution_model": "sequential_safety_gate",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "2.4.1_dynamic_constraint_check",
+          "2.4.2_collision_risk_screen",
+          "2.4.3_fallback_trajectory_selection"
+        ]
+      }
+    },
+    "act": {
+      "3.1_control": {
+        "execution_model": "high_rate_control_loops",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "3.1.1_lateral_control",
+          "3.1.2_longitudinal_control",
+          "3.1.3_actuator_commands"
+        ]
+      },
+      "3.2_feedback": {
+        "execution_model": "continuous_monitoring",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "3.2.1_state_monitoring",
+          "3.2.2_error_correction",
+          "3.2.3_safety_supervision"
+        ]
+      }
+    }
+  },
+  "timing": {
+    "camera_pipeline_rate_hz": 30,
+    "radar_pipeline_rate_hz": 20,
+    "central_loop_rate_hz": 50,
+    "fusion_rate_hz": 50,
+    "localization_rate_hz": 100,
+    "prediction_planning_rate_hz": 50,
+    "control_rate_hz": 50
+  },
+  "bandwidth_budgets": {
+    "camera_ingress_total_mbps": 9000,
+    "radar_ingress_total_mbps": 500,
+    "vehicle_state_ingress_total_mbps": 8,
+    "compute_ecu_ingress_total_mbps": 9508,
+    "control_bus_reserved_mbps": 50
+  },
+  "topology": {
+    "nodes": [
+      {
+        "id": "camera_ingress",
+        "name": "Camera Ingress",
+        "type": "sensor_ingress",
+        "cores": 2,
+        "scheduler": "fifo"
+      },
+      {
+        "id": "radar_ingress",
+        "name": "Radar Ingress",
+        "type": "sensor_ingress",
+        "cores": 2,
+        "scheduler": "fifo"
+      },
+      {
+        "id": "compute_ecu_main",
+        "name": "Compute ECU Main",
+        "type": "multicore_ecu",
+        "cores": 8,
+        "scheduler": "edf"
+      }
+    ],
+    "links": [
+      {
+        "from": "radar_ingress",
+        "to": "compute_ecu_main",
+        "bandwidth_mbps": 500,
+        "latency_ms": 0.5
+      },
+      {
+        "from": "camera_ingress",
+        "to": "compute_ecu_main",
+        "bandwidth_mbps": 9000,
+        "latency_ms": 0.4
+      }
+    ]
+  },
+  "execution": {
+    "thread_pool_size": 8,
+    "scheduler": "fifo",
+    "central_cycle_mode": "allow_overlap",
+    "run_duration_seconds": 2,
+    "stage_timing": {
+      "mode": "hybrid",
+      "sampled": true,
+      "spin_guard_us": 300
+    }
+  },
+  "scenarios": [
+    {
+      "id": "adas_realtime_distributed",
+      "name": "ADAS real-time execution: 6 dumb cameras + 5 smart radars",
+      "scope": "distributed_ecus",
+      "pipeline": {
+        "id": "root",
+        "name": "Sense-Plan-Act",
+        "kind": "serial",
+        "execution_times": {
+          "min_ms": 8.0,
+          "avg_ms": 15.0,
+          "max_ms": 26.0
+        },
+        "mapped_nodes": [
+          "camera_ingress",
+          "radar_ingress",
+          "compute_ecu_main"
+        ],
+        "steps": [
+          {
+            "id": "sense",
+            "name": "Sense",
+            "kind": "serial",
+            "execution_times": {
+              "min_ms": 4.0,
+              "avg_ms": 7.5,
+              "max_ms": 13.0
+            },
+            "mapped_nodes": [
+              "camera_ingress",
+              "radar_ingress",
+              "compute_ecu_main"
+            ],
+            "steps": [
+              {
+                "id": "sense_1_1_camera_processing",
+                "name": "1.1 Camera processing",
+                "kind": "task",
+                "execution_times": {
+                  "min_ms": 1.2,
+                  "avg_ms": 2.3,
+                  "max_ms": 4.0
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_2_radar_processing",
+                "name": "1.2 Radar processing",
+                "kind": "task",
+                "execution_times": {
+                  "min_ms": 0.8,
+                  "avg_ms": 1.6,
+                  "max_ms": 2.8
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_3_sensor_acquisition",
+                "name": "1.3 Collect latest sensor outputs",
+                "kind": "parallel",
+                "execution_times": {
+                  "min_ms": 0.5,
+                  "avg_ms": 1.1,
+                  "max_ms": 2.0
+                },
+                "mapped_nodes": [
+                  "camera_ingress",
+                  "radar_ingress",
+                  "compute_ecu_main"
+                ],
+                "steps": [
+                  {
+                    "id": "sense_1_3_1_camera_capture",
+                    "name": "1.3.1 Camera capture (6 dumb cameras)",
+                    "kind": "task",
+                    "execution_times": {
+                      "min_ms": 0.3,
+                      "avg_ms": 0.7,
+                      "max_ms": 1.3
+                    },
+                    "mapped_nodes": [
+                      "camera_ingress"
+                    ]
+                  },
+                  {
+                    "id": "sense_1_3_2_radar_capture",
+                    "name": "1.3.2 Radar capture (5 radars)",
+                    "kind": "task",
+                    "execution_times": {
+                      "min_ms": 0.3,
+                      "avg_ms": 0.6,
+                      "max_ms": 1.1
+                    },
+                    "mapped_nodes": [
+                      "radar_ingress"
+                    ]
+                  },
+                  {
+                    "id": "sense_1_3_3_vehicle_state_capture",
+                    "name": "1.3.3 Vehicle state capture",
+                    "kind": "task",
+                    "execution_times": {
+                      "min_ms": 0.1,
+                      "avg_ms": 0.2,
+                      "max_ms": 0.4
+                    },
+                    "mapped_nodes": [
+                      "compute_ecu_main"
+                    ]
+                  },
+                  {
+                    "id": "sense_1_3_4_time_sync_on_consume",
+                    "name": "1.3.4 Time sync on consume",
+                    "kind": "task",
+                    "execution_times": {
+                      "min_ms": 0.1,
+                      "avg_ms": 0.2,
+                      "max_ms": 0.4
+                    },
+                    "mapped_nodes": [
+                      "compute_ecu_main"
+                    ]
+                  }
+                ]
+              },
+              {
+                "id": "sense_1_4_fusion",
+                "name": "1.4 Fusion",
+                "kind": "task",
+                "execution_times": {
+                  "min_ms": 5.0,
+                  "avg_ms": 7.5,
+                  "max_ms": 10.0
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_5_localization",
+                "name": "1.5 Localization",
+                "kind": "task",
+                "execution_times": {
+                  "min_ms": 3.0,
+                  "avg_ms": 5.0,
+                  "max_ms": 7.0
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_6_world_map_build",
+                "name": "1.6 World map build",
+                "kind": "task",
+                "execution_times": {
+                  "min_ms": 2.0,
+                  "avg_ms": 3.5,
+                  "max_ms": 5.0
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "plan",
+            "name": "Plan",
+            "kind": "serial",
+            "execution_times": {
+              "min_ms": 2.0,
+              "avg_ms": 4.2,
+              "max_ms": 7.2
+            },
+            "mapped_nodes": [
+              "compute_ecu_main"
+            ],
+            "steps": [
+              {
+                "id": "plan_2_1_prediction",
+                "name": "2.1 Prediction",
+                "kind": "task",
+                "execution_times": {
+                  "min_ms": 3.0,
+                  "avg_ms": 5.0,
+                  "max_ms": 8.0
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "plan_2_2_behavior_planning",
+                "name": "2.2 Behavior planning",
+                "kind": "task",
+                "execution_times": {
+                  "min_ms": 1.0,
+                  "avg_ms": 1.8,
+                  "max_ms": 3.0
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "plan_2_3_trajectory_planning",
+                "name": "2.3 Trajectory planning",
+                "kind": "task",
+                "execution_times": {
+                  "min_ms": 2.0,
+                  "avg_ms": 3.5,
+                  "max_ms": 6.0
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "plan_2_4_trajectory_plausibility_check",
+                "name": "2.4 Trajectory plausibility check",
+                "kind": "task",
+                "execution_times": {
+                  "min_ms": 1.0,
+                  "avg_ms": 1.8,
+                  "max_ms": 3.0
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              }
+            ]
+          },
+          {
+            "id": "act",
+            "name": "Act",
+            "kind": "serial",
+            "execution_times": {
+              "min_ms": 1.0,
+              "avg_ms": 3.3,
+              "max_ms": 5.8
+            },
+            "mapped_nodes": [
+              "compute_ecu_main"
+            ],
+            "steps": [
+              {
+                "id": "act_3_1_control",
+                "name": "3.1 Control",
+                "kind": "task",
+                "execution_times": {
+                  "min_ms": 1.0,
+                  "avg_ms": 1.5,
+                  "max_ms": 2.0
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "act_3_2_feedback",
+                "name": "3.2 Feedback",
+                "kind": "task",
+                "execution_times": {
+                  "min_ms": 0.4,
+                  "avg_ms": 1.3,
+                  "max_ms": 2.3
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

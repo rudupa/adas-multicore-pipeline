@@ -251,6 +251,51 @@ In this **logical view**, you can read it as:
 
 Now, same pipeline, but marked by **real-time behavior**.
 
+### Reference deployment used in this repo
+
+The repository now includes a concrete system-level configuration at
+[config/adas_pipeline_config.json](config/adas_pipeline_config.json) with this deployment split:
+
+- **6 dumb cameras** → send raw frames directly to the central compute ECU
+- **5 smart radars** → perform radar-local processing on radar ECUs before sending tracked targets
+- **1 central compute ECU** → runs camera perception, fusion, localization, prediction, and planning
+- **1 actuation ECU** → runs control, feedback, and safety supervision
+
+#### Sensor and ECU mapping
+
+| Domain | Count | Intelligence | Main placement |
+|--------|-------|--------------|----------------|
+| Cameras | 6 | Dumb | Raw frame transport to `compute_ecu_main` |
+| Radars | 5 | Smart | Radar processing on radar ECUs |
+| Fusion / Localization / Planning | 1 domain | Centralized | `compute_ecu_main` |
+| Control / Feedback | 1 domain | Centralized control | `actuation_ecu` |
+
+#### Camera deployment
+
+- `cam_front_narrow`
+- `cam_front_wide`
+- `cam_left_front`
+- `cam_right_front`
+- `cam_left_rear`
+- `cam_rear`
+
+#### Radar deployment
+
+- `radar_front_long`
+- `radar_front_left_corner`
+- `radar_front_right_corner`
+- `radar_rear_left_corner`
+- `radar_rear_right_corner`
+
+#### Processing split
+
+- **Radar ECU local pipeline:**
+  `signal_processing → cfar_detection → clustering → ego_motion_compensation → radar_tracking`
+- **Central compute ECU pipeline:**
+  `camera preprocessing → object detection → lane/road detection → semantic segmentation → fusion → localization → prediction → behavior planning → trajectory planning`
+- **Actuation ECU:**
+  `lateral control → longitudinal control → actuator commands → feedback → safety supervision`
+
 ### 1. Sense (real time)
 
 **1.1 Sensor acquisition (parallel sources)**  
@@ -304,7 +349,7 @@ Now, same pipeline, but marked by **real-time behavior**.
 **Real-time note:**  
 - Fusion waits for a **time-aligned set** of camera outputs, radar outputs, and vehicle state.  
 - Within fusion, 1.4.1–1.4.6 are mostly **sequential** per cycle, but can be multi-threaded internally.
-
+ 
 ---
 
 **1.5 Localization (continuous, partially parallel)**  

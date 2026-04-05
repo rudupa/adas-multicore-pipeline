@@ -81,12 +81,11 @@ set(CORE_SOURCES
 set(SENSOR_SOURCES
     src/sensors/camera_sensor.cpp
     src/sensors/radar_sensor.cpp
+    src/sensors/vehicle_state_sensor.cpp
 )
 
 set(PIPELINE_SOURCES
-    src/pipeline/preprocess_stage.cpp
-    src/pipeline/detection_stage.cpp
-    src/pipeline/tracking_stage.cpp
+    src/pipeline/configured_stage.cpp
     src/pipeline/pipeline.cpp
 )
 
@@ -137,7 +136,7 @@ endif()
 
 # ── Copy config to build directory ──────────────────────────────────
 configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/config/pipeline_config.json
-    ${CMAKE_CURRENT_BINARY_DIR}/config/pipeline_config.json
+    ${CMAKE_CURRENT_SOURCE_DIR}/config/adas_pipeline_config.json
+    ${CMAKE_CURRENT_BINARY_DIR}/config/adas_pipeline_config.json
     COPYONLY
 )
