@@ -1249,7 +1249,7 @@ int main(int argc, char* argv[]) {
         ImGui::SetNextWindowSize(ImVec2(right_w, timeline_h), ImGuiCond_Always);
         ImGui::Begin("Pipeline Timeline", nullptr,
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-        if (ImPlot::BeginPlot("Events", ImVec2(-1, -1))) {
+        if (ImPlot::BeginPlot("Events", ImVec2(-1, -1), ImPlotFlags_NoLegend)) {
             std::vector<double> y_ticks;
             std::vector<const char*> y_labels;
             std::map<std::string, int> lane_to_idx;
