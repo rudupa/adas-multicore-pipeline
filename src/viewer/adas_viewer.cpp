@@ -599,11 +599,15 @@ int main(int argc, char* argv[]) {
         }
     };
 
-    std::vector<double> throughput_t;
-    std::vector<double> throughput_fps;
+    std::vector<double> throughput_t{0.0};
+    std::vector<double> throughput_fps{0.0};
+    std::vector<double> throughput_sensor_fps{0.0};
     auto hist_t0 = std::chrono::steady_clock::now();
     auto last_sample = hist_t0;
     size_t last_completed = 0;
+    size_t observed_event_count = 0;
+    size_t observed_sensor_events = 0;
+    size_t last_observed_sensor_events = 0;
 
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
@@ -621,6 +625,18 @@ int main(int argc, char* argv[]) {
                              const auto rhs_key = std::make_tuple(rhs.lane, rhs.start, rhs.frame_id);
                              return lhs_key < rhs_key;
                          });
+
+        if (snap.events.size() < observed_event_count) {
+            observed_event_count = 0;
+            observed_sensor_events = 0;
+            last_observed_sensor_events = 0;
+        }
+        for (size_t i = observed_event_count; i < snap.events.size(); ++i) {
+            if (snap.events[i].glyph == '#') {
+                ++observed_sensor_events;
+            }
+        }
+        observed_event_count = snap.events.size();
         io.FontGlobalScale = ui_scale;
 
         double max_ms = 0.0;
@@ -684,11 +700,17 @@ int main(int argc, char* argv[]) {
         if (sim_running && now - last_sample >= std::chrono::seconds(1)) {
             const double tsec = std::chrono::duration<double>(now - hist_t0).count();
             const size_t curr = pipeline->metrics().total_completed();
+            const size_t curr_sensor_events = observed_sensor_events;
             const double dt = std::chrono::duration<double>(now - last_sample).count();
             const double fps = dt > 0.0 ? static_cast<double>(curr - last_completed) / dt : 0.0;
+            const double sensor_fps = dt > 0.0
+                ? static_cast<double>(curr_sensor_events - last_observed_sensor_events) / dt
+                : 0.0;
             throughput_t.push_back(tsec);
             throughput_fps.push_back(fps);
+            throughput_sensor_fps.push_back(sensor_fps);
             last_completed = curr;
+            last_observed_sensor_events = curr_sensor_events;
             last_sample = now;
         }
 
@@ -994,9 +1016,16 @@ int main(int argc, char* argv[]) {
                 }
                 throughput_t.clear();
                 throughput_fps.clear();
+                throughput_sensor_fps.clear();
+                throughput_t.push_back(0.0);
+                throughput_fps.push_back(0.0);
+                throughput_sensor_fps.push_back(0.0);
                 hist_t0 = std::chrono::steady_clock::now();
                 last_sample = hist_t0;
                 last_completed = 0;
+                observed_event_count = 0;
+                observed_sensor_events = 0;
+                last_observed_sensor_events = 0;
                 manual_view_start_ms = 0.0f;
                 start_simulation();
             }
@@ -1170,11 +1199,84 @@ int main(int argc, char* argv[]) {
         ImGui::SetNextWindowSize(ImVec2(right_w, top_h), ImGuiCond_Always);
         ImGui::Begin("Throughput", nullptr,
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-        if (ImPlot::BeginPlot("Completed FPS", ImVec2(-1, 220))) {
-            ImPlot::SetupAxes("Time (s)", "Frames/s", ImPlotAxisFlags_AutoFit, ImPlotAxisFlags_AutoFit);
+        if (ImPlot::BeginPlot("Completed FPS", ImVec2(-1, 220), ImPlotFlags_Crosshairs)) {
+            ImPlot::SetupAxes("Time (s)", "Frames/s", ImPlotAxisFlags_None, ImPlotAxisFlags_AutoFit);
+            ImPlot::SetupAxisLimits(ImAxis_X1, 0.0,
+                                    std::max(1.0, static_cast<double>(runtime_cfg.run_duration_seconds)),
+                                    ImGuiCond_Always);
             if (!throughput_t.empty()) {
                 ImPlot::PlotLine("fps", throughput_t.data(), throughput_fps.data(), static_cast<int>(throughput_t.size()));
+                ImPlot::PlotLine("sensor ingress fps", throughput_t.data(), throughput_sensor_fps.data(), static_cast<int>(throughput_t.size()));
             }
+
+            if (ImPlot::IsPlotHovered()) {
+                const ImPlotPoint mouse = ImPlot::GetPlotMousePos();
+
+                auto sample_signal_at = [&](const std::vector<double>& ys, double x, double& y_out) {
+                    const size_t count = std::min(throughput_t.size(), ys.size());
+                    if (count == 0) {
+                        return false;
+                    }
+
+                    if (x < throughput_t.front() || x > throughput_t[count - 1]) {
+                        return false;
+                    }
+
+                    auto begin_it = throughput_t.begin();
+                    auto end_it = throughput_t.begin() + static_cast<std::ptrdiff_t>(count);
+                    auto hi_it = std::lower_bound(begin_it, end_it, x);
+
+                    if (hi_it == begin_it) {
+                        y_out = ys.front();
+                        return true;
+                    }
+                    if (hi_it == end_it) {
+                        y_out = ys[count - 1];
+                        return true;
+                    }
+
+                    const size_t hi = static_cast<size_t>(hi_it - begin_it);
+                    if (*hi_it == x) {
+                        y_out = ys[hi];
+                        return true;
+                    }
+
+                    const size_t lo = hi - 1;
+                    const double x0 = throughput_t[lo];
+                    const double x1 = throughput_t[hi];
+                    if (x1 <= x0) {
+                        y_out = ys[hi];
+                        return true;
+                    }
+
+                    const double y0 = ys[lo];
+                    const double y1 = ys[hi];
+                    const double alpha = (x - x0) / (x1 - x0);
+                    y_out = y0 + (y1 - y0) * alpha;
+                    return true;
+                };
+
+                double completed_fps_at_x = 0.0;
+                double sensor_ingress_fps_at_x = 0.0;
+                const bool has_completed = sample_signal_at(throughput_fps, mouse.x, completed_fps_at_x);
+                const bool has_sensor = sample_signal_at(throughput_sensor_fps, mouse.x, sensor_ingress_fps_at_x);
+
+                ImGui::BeginTooltip();
+                ImGui::Text("Time: %.3f s", mouse.x);
+                ImGui::Separator();
+                if (has_completed) {
+                    ImGui::Text("fps: %.3f", completed_fps_at_x);
+                } else {
+                    ImGui::TextDisabled("fps: n/a (outside sampled range)");
+                }
+                if (has_sensor) {
+                    ImGui::Text("sensor ingress fps: %.3f", sensor_ingress_fps_at_x);
+                } else {
+                    ImGui::TextDisabled("sensor ingress fps: n/a (outside sampled range)");
+                }
+                ImGui::EndTooltip();
+            }
+
             ImPlot::EndPlot();
         }
         ImGui::End();
@@ -1240,7 +1342,7 @@ int main(int argc, char* argv[]) {
         ImGui::SetNextWindowSize(ImVec2(right_w, timeline_h), ImGuiCond_Always);
         ImGui::Begin("Pipeline Timeline", nullptr,
                      ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
-        if (ImPlot::BeginPlot("Events", ImVec2(-1, -1), ImPlotFlags_NoLegend)) {
+        if (ImPlot::BeginPlot("Events", ImVec2(-1, -1), ImPlotFlags_NoLegend | ImPlotFlags_Crosshairs)) {
             std::vector<double> y_ticks;
             std::vector<const char*> y_labels;
             std::map<std::string, int> lane_to_idx;

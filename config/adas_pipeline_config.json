@@ -658,7 +658,7 @@
     "thread_pool_size": 8,
     "scheduler": "fifo",
     "central_cycle_mode": "allow_overlap",
-    "run_duration_seconds": 2,
+    "run_duration_seconds": 5,
     "stage_timing": {
       "mode": "hybrid",
       "sampled": true,
