@@ -368,8 +368,82 @@ void Pipeline::process_camera_frame(std::shared_ptr<Frame> frame) {
 }
 
 void Pipeline::process_radar_frame(std::shared_ptr<Frame> frame) {
-    if (auto* stage = find_stage_by_id("sense_1_2_radar_processing")) {
-        run_stage(*stage, frame, false);
+    // Preserve legacy behavior when only the coarse radar stage is configured.
+    const bool has_detailed_radar_pipeline =
+        find_stage_by_id("sense_1_2_1_adc_ingest_and_calibration") != nullptr;
+
+    if (!has_detailed_radar_pipeline) {
+        if (auto* stage = find_stage_by_id("sense_1_2_radar_processing")) {
+            run_stage(*stage, frame, false);
+        }
+    } else {
+        static const char* pre_stage_ids[] = {
+            "sense_1_2_1_adc_ingest_and_calibration"
+        };
+        static const char* signal_branch_a_ids[] = {
+            "sense_1_2_2_range_fft",
+            "sense_1_2_3_doppler_fft"
+        };
+        static const char* signal_branch_b_ids[] = {
+            "sense_1_2_4_interference_mitigation",
+            "sense_1_2_5_static_clutter_suppression"
+        };
+        static const char* detect_and_track_ids[] = {
+            "sense_1_2_6_cfar_detection_2d",
+            "sense_1_2_7_angle_of_arrival_estimation",
+            "sense_1_2_8_doppler_phase_unwrap_unambiguous",
+            "sense_1_2_9_point_clustering",
+            "sense_1_2_10_multi_target_tracking"
+        };
+        static const char* radar_only_branch_a_ids[] = {
+            "sense_1_2_11_free_space_occupancy_grid"
+        };
+        static const char* radar_only_branch_b_ids[] = {
+            "sense_1_2_12_road_boundary_and_guardrail_estimation"
+        };
+        static const char* post_stage_ids[] = {
+            "sense_1_2_13_object_list_packaging"
+        };
+
+        auto run_stage_list = [this, &frame](const char* const* stage_ids, size_t count) {
+            for (size_t i = 0; i < count; ++i) {
+                if (auto* stage = find_stage_by_id(stage_ids[i])) {
+                    run_stage(*stage, frame, false);
+                }
+            }
+        };
+
+        run_stage_list(pre_stage_ids, sizeof(pre_stage_ids) / sizeof(pre_stage_ids[0]));
+
+        auto signal_branch_a_future = std::async(
+            std::launch::async,
+            run_stage_list,
+            signal_branch_a_ids,
+            sizeof(signal_branch_a_ids) / sizeof(signal_branch_a_ids[0]));
+        auto signal_branch_b_future = std::async(
+            std::launch::async,
+            run_stage_list,
+            signal_branch_b_ids,
+            sizeof(signal_branch_b_ids) / sizeof(signal_branch_b_ids[0]));
+        signal_branch_a_future.get();
+        signal_branch_b_future.get();
+
+        run_stage_list(detect_and_track_ids, sizeof(detect_and_track_ids) / sizeof(detect_and_track_ids[0]));
+
+        auto radar_only_branch_a_future = std::async(
+            std::launch::async,
+            run_stage_list,
+            radar_only_branch_a_ids,
+            sizeof(radar_only_branch_a_ids) / sizeof(radar_only_branch_a_ids[0]));
+        auto radar_only_branch_b_future = std::async(
+            std::launch::async,
+            run_stage_list,
+            radar_only_branch_b_ids,
+            sizeof(radar_only_branch_b_ids) / sizeof(radar_only_branch_b_ids[0]));
+        radar_only_branch_a_future.get();
+        radar_only_branch_b_future.get();
+
+        run_stage_list(post_stage_ids, sizeof(post_stage_ids) / sizeof(post_stage_ids[0]));
     }
 
     {

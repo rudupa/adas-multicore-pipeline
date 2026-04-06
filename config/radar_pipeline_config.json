@@ -1,0 +1,364 @@
+{
+  "schema_version": "v2",
+  "name": "adas_radar_processing_only",
+  "sensors": {
+    "radars": [
+      {
+        "name": "radar_front_long",
+        "short_name": "RAD_FC",
+        "type": "radar",
+        "sampling_rate_hz": 20,
+        "output": {
+          "frame_size_bytes": 32768
+        },
+        "bandwidth_mbps": 100
+      }
+    ]
+  },
+  "bandwidth": {
+    "global_limit_mbps": 200,
+    "window_duration_ms": 1000
+  },
+  "timing": {
+    "central_loop_rate_hz": 50
+  },
+  "execution": {
+    "thread_pool_size": 6,
+    "scheduler": "fifo",
+    "central_cycle_mode": "allow_overlap",
+    "stage_timing_mode": "hybrid",
+    "stage_timing_sampled": true,
+    "stage_spin_guard_us": 300,
+    "run_duration_seconds": 2,
+    "queue_capacity": 64
+  },
+  "scenarios": [
+    {
+      "id": "radar_only",
+      "name": "Radar processing only",
+      "pipeline": {
+        "steps": [
+          {
+            "id": "sense",
+            "name": "Sense",
+            "steps": [
+              {
+                "id": "sense_1_2_1_adc_ingest_and_calibration",
+                "name": "1.2.1 ADC ingest + calibration",
+                "kind": "task",
+                "priority": 90,
+                "preferred_core": 0,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 3.0,
+                  "avg_ms": 4.0,
+                  "max_ms": 5.5
+                },
+                "steps": [
+                  {
+                    "id": "sense_1_2_1_1_dc_iq_correction",
+                    "name": "DC removal + IQ imbalance correction"
+                  },
+                  {
+                    "id": "sense_1_2_1_2_channel_calibration",
+                    "name": "RX channel gain/phase calibration"
+                  }
+                ],
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_2_2_range_fft",
+                "name": "1.2.2 Range FFT",
+                "kind": "task",
+                "priority": 88,
+                "preferred_core": 1,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 11.0,
+                  "avg_ms": 14.0,
+                  "max_ms": 18.0
+                },
+                "steps": [
+                  {
+                    "id": "sense_1_2_2_1_windowing",
+                    "name": "Windowing across fast-time"
+                  },
+                  {
+                    "id": "sense_1_2_2_2_fft",
+                    "name": "1D FFT per chirp"
+                  }
+                ],
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_2_3_doppler_fft",
+                "name": "1.2.3 Doppler FFT",
+                "kind": "task",
+                "priority": 87,
+                "preferred_core": 2,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 10.0,
+                  "avg_ms": 13.0,
+                  "max_ms": 17.0
+                },
+                "steps": [
+                  {
+                    "id": "sense_1_2_3_1_slow_time_window",
+                    "name": "Windowing across chirps"
+                  },
+                  {
+                    "id": "sense_1_2_3_2_fft",
+                    "name": "2D FFT to range-Doppler map"
+                  }
+                ],
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_2_4_interference_mitigation",
+                "name": "1.2.4 Interference mitigation",
+                "kind": "task",
+                "priority": 86,
+                "preferred_core": 3,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 5.0,
+                  "avg_ms": 8.0,
+                  "max_ms": 12.0
+                },
+                "steps": [
+                  {
+                    "id": "sense_1_2_4_1_spectral_notch",
+                    "name": "Interference spectral notch filtering"
+                  },
+                  {
+                    "id": "sense_1_2_4_2_time_domain_blank",
+                    "name": "Time-domain blanking"
+                  }
+                ],
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_2_5_static_clutter_suppression",
+                "name": "1.2.5 Static clutter suppression",
+                "kind": "task",
+                "priority": 85,
+                "preferred_core": 4,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 4.0,
+                  "avg_ms": 7.0,
+                  "max_ms": 10.0
+                },
+                "steps": [
+                  {
+                    "id": "sense_1_2_5_1_mtifilter",
+                    "name": "MTI high-pass clutter filter"
+                  }
+                ],
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_2_6_cfar_detection_2d",
+                "name": "1.2.6 2D CFAR detection",
+                "kind": "task",
+                "priority": 84,
+                "preferred_core": 1,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 6.0,
+                  "avg_ms": 8.0,
+                  "max_ms": 11.0
+                },
+                "steps": [
+                  {
+                    "id": "sense_1_2_6_1_ca_cfar",
+                    "name": "CA-CFAR over range-Doppler map"
+                  }
+                ],
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_2_7_angle_of_arrival_estimation",
+                "name": "1.2.7 Angle-of-arrival estimation",
+                "kind": "task",
+                "priority": 83,
+                "preferred_core": 2,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 7.0,
+                  "avg_ms": 10.0,
+                  "max_ms": 14.0
+                },
+                "steps": [
+                  {
+                    "id": "sense_1_2_7_1_mimo_beamforming",
+                    "name": "MIMO beamforming / azimuth-elevation estimation"
+                  }
+                ],
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_2_8_doppler_phase_unwrap_unambiguous",
+                "name": "1.2.8 Doppler unwrapping (unambiguous detections)",
+                "kind": "task",
+                "priority": 82,
+                "preferred_core": 3,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 5.0,
+                  "avg_ms": 7.0,
+                  "max_ms": 10.0
+                },
+                "steps": [
+                  {
+                    "id": "sense_1_2_8_1_multi_prf_unwrap",
+                    "name": "Multi-PRF/phase unwrap for velocity ambiguity resolution"
+                  }
+                ],
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_2_9_point_clustering",
+                "name": "1.2.9 Point clustering",
+                "kind": "task",
+                "priority": 81,
+                "preferred_core": 4,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 5.0,
+                  "avg_ms": 7.0,
+                  "max_ms": 10.0
+                },
+                "steps": [
+                  {
+                    "id": "sense_1_2_9_1_dbscan",
+                    "name": "DBSCAN object candidate clustering"
+                  }
+                ],
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_2_10_multi_target_tracking",
+                "name": "1.2.10 Multi-target tracking",
+                "kind": "task",
+                "priority": 80,
+                "preferred_core": 5,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 6.0,
+                  "avg_ms": 8.0,
+                  "max_ms": 12.0
+                },
+                "steps": [
+                  {
+                    "id": "sense_1_2_10_1_kalman",
+                    "name": "Track association + Kalman filtering"
+                  }
+                ],
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_2_11_free_space_occupancy_grid",
+                "name": "1.2.11 Radar free-space occupancy",
+                "kind": "task",
+                "priority": 78,
+                "preferred_core": 1,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 4.0,
+                  "avg_ms": 7.0,
+                  "max_ms": 10.0
+                },
+                "steps": [
+                  {
+                    "id": "sense_1_2_11_1_grid_update",
+                    "name": "Near-field occupancy grid update"
+                  }
+                ],
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_2_12_road_boundary_and_guardrail_estimation",
+                "name": "1.2.12 Road boundary + guardrail estimation",
+                "kind": "task",
+                "priority": 77,
+                "preferred_core": 2,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 4.0,
+                  "avg_ms": 6.0,
+                  "max_ms": 9.0
+                },
+                "steps": [
+                  {
+                    "id": "sense_1_2_12_1_boundary_fit",
+                    "name": "Boundary/guardrail model fitting"
+                  }
+                ],
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_2_13_object_list_packaging",
+                "name": "1.2.13 Object list packaging",
+                "kind": "task",
+                "priority": 76,
+                "preferred_core": 0,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 2.0,
+                  "avg_ms": 3.0,
+                  "max_ms": 5.0
+                },
+                "steps": [
+                  {
+                    "id": "sense_1_2_13_1_publish",
+                    "name": "Publish unambiguous detections + tracked objects"
+                  }
+                ],
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "topology": {
+    "nodes": [
+      {
+        "id": "compute_ecu_main",
+        "name": "Central Compute ECU",
+        "type": "multicore_ecu",
+        "cores": 4,
+        "scheduler": "fifo"
+      }
+    ]
+  }
+}
