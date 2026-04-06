@@ -576,6 +576,16 @@ int main(int argc, char* argv[]) {
     float manual_view_start_ms = 0.0f;
     bool show_frame_numbers = true;
     bool show_help_window = false;
+    struct TimelineMeasure {
+        double start_ms = 0.0;
+        double end_ms = 0.0;
+        uint32_t id = 0;
+    };
+    std::vector<TimelineMeasure> timeline_measures;
+    bool measure_drag_active = false;
+    double measure_drag_start_ms = 0.0;
+    double measure_drag_current_ms = 0.0;
+    uint32_t next_measure_id = 1;
     std::map<std::string, bool> lane_visibility;
     std::vector<LaneDef> lane_defs = build_ordered_lanes(runtime_cfg);
     std::map<std::string, int> lane_thread_counts = build_lane_thread_counts(runtime_cfg);
@@ -1147,7 +1157,7 @@ int main(int argc, char* argv[]) {
             ImGui::SliderFloat("Timeline position (ms)", &manual_view_start_ms, 0.0f,
                                std::max(0.0f, max_timeline_start_ms), "%.0f");
             ImGui::Checkbox("Show frame numbers", &show_frame_numbers);
-            ImGui::TextUnformatted("Timeline: scroll to pan, Ctrl+scroll (pinch) to zoom window, drag to pan.");
+            ImGui::TextUnformatted("Timeline: scroll to pan, Ctrl+scroll (pinch) to zoom, drag to measure, double-click clears all, Ctrl+double-click clears hovered.");
             if (const auto* acq_stage = find_stage(runtime_cfg, "sense_1_3_sensor_acquisition");
                 acq_stage != nullptr) {
                 auto it = lane_stats.find(acq_stage->lane);
@@ -1269,6 +1279,56 @@ int main(int argc, char* argv[]) {
             ImPlot::SetupAxisLimits(ImAxis_X1, x_start, x_end, ImGuiCond_Always);
             ImPlot::SetupAxisLimits(ImAxis_Y1, -1.0, static_cast<double>(std::max(1, lane_count)), ImGuiCond_Always);
 
+            ImDrawList* draw_list = ImPlot::GetPlotDrawList();
+            const ImVec2 plot_pos = ImPlot::GetPlotPos();
+            const ImVec2 plot_size = ImPlot::GetPlotSize();
+            const ImVec2 plot_min = plot_pos;
+            const ImVec2 plot_max = ImVec2(plot_pos.x + plot_size.x, plot_pos.y + plot_size.y);
+
+            // Draw previously created measurement windows with cursor 1 (start) and 2 (end).
+            for (const auto& measure : timeline_measures) {
+                const double s = std::min(measure.start_ms, measure.end_ms);
+                const double e = std::max(measure.start_ms, measure.end_ms);
+                if (e < x_start || s > x_end) {
+                    continue;
+                }
+
+                const ImVec2 p_start = ImPlot::PlotToPixels(s, -1.0);
+                const ImVec2 p_end = ImPlot::PlotToPixels(e, static_cast<double>(std::max(1, lane_count)));
+                const float left = std::min(p_start.x, p_end.x);
+                const float right = std::max(p_start.x, p_end.x);
+
+                draw_list->AddRectFilled(ImVec2(left, plot_min.y), ImVec2(right, plot_max.y),
+                                         IM_COL32(90, 180, 255, 36));
+                draw_list->AddLine(ImVec2(left, plot_min.y), ImVec2(left, plot_max.y),
+                                   IM_COL32(95, 210, 255, 215), 1.5f);
+                draw_list->AddLine(ImVec2(right, plot_min.y), ImVec2(right, plot_max.y),
+                                   IM_COL32(255, 190, 110, 215), 1.5f);
+
+                const std::string start_label = "1";
+                const std::string end_label = "2";
+                draw_list->AddText(ImVec2(left + 3.0f, plot_min.y + 4.0f),
+                                   IM_COL32(95, 210, 255, 240), start_label.c_str());
+                draw_list->AddText(ImVec2(right + 3.0f, plot_min.y + 4.0f),
+                                   IM_COL32(255, 190, 110, 240), end_label.c_str());
+            }
+
+            // Draw live measurement preview while dragging.
+            if (measure_drag_active) {
+                const double s = std::min(measure_drag_start_ms, measure_drag_current_ms);
+                const double e = std::max(measure_drag_start_ms, measure_drag_current_ms);
+                const ImVec2 p_start = ImPlot::PlotToPixels(s, -1.0);
+                const ImVec2 p_end = ImPlot::PlotToPixels(e, static_cast<double>(std::max(1, lane_count)));
+                const float left = std::min(p_start.x, p_end.x);
+                const float right = std::max(p_start.x, p_end.x);
+                draw_list->AddRectFilled(ImVec2(left, plot_min.y), ImVec2(right, plot_max.y),
+                                         IM_COL32(100, 255, 180, 28));
+                draw_list->AddLine(ImVec2(left, plot_min.y), ImVec2(left, plot_max.y),
+                                   IM_COL32(100, 255, 180, 220), 1.2f);
+                draw_list->AddLine(ImVec2(right, plot_min.y), ImVec2(right, plot_max.y),
+                                   IM_COL32(100, 255, 180, 220), 1.2f);
+            }
+
             // Assign overlapping events to stacked sub-rows within each lane.
             const double overlap_guard_ms = 0.01;
             const double slot_step = 0.16;
@@ -1300,7 +1360,6 @@ int main(int argc, char* argv[]) {
                 event_slots[ev_idx] = assigned_slot;
             }
 
-            ImDrawList* draw_list = ImPlot::GetPlotDrawList();
             int idx = 0;
             for (size_t ev_idx = 0; ev_idx < sorted_events.size(); ++ev_idx) {
                 const auto& e = sorted_events[ev_idx];
@@ -1357,11 +1416,32 @@ int main(int argc, char* argv[]) {
                 const ImPlotPoint mouse = ImPlot::GetPlotMousePos();
                 const double y_tolerance = 0.16;
                 const double marker_x_tolerance = std::max(0.8, static_cast<double>(view_window_ms) * 0.005);
+                const double measure_x_tolerance = std::max(0.5, static_cast<double>(view_window_ms) * 0.003);
 
                 const adas::TimelineVisualizer::Event* hovered_event = nullptr;
                 const adas::TimelineVisualizer::Marker* hovered_marker = nullptr;
+                const TimelineMeasure* hovered_measure = nullptr;
                 double hovered_event_dist = std::numeric_limits<double>::max();
                 double hovered_marker_dist = std::numeric_limits<double>::max();
+                double hovered_measure_dist = std::numeric_limits<double>::max();
+
+                for (const auto& measure : timeline_measures) {
+                    const double s = std::min(measure.start_ms, measure.end_ms);
+                    const double e = std::max(measure.start_ms, measure.end_ms);
+                    if (e < x_start || s > x_end) {
+                        continue;
+                    }
+                    const bool inside_band = mouse.x >= s && mouse.x <= e;
+                    const double line_dist = std::min(std::abs(mouse.x - s), std::abs(mouse.x - e));
+                    if (!inside_band && line_dist > measure_x_tolerance) {
+                        continue;
+                    }
+                    const double dist = inside_band ? std::abs(mouse.x - (s + e) * 0.5) : line_dist;
+                    if (dist < hovered_measure_dist) {
+                        hovered_measure_dist = dist;
+                        hovered_measure = &measure;
+                    }
+                }
 
                 for (size_t ev_idx = 0; ev_idx < sorted_events.size(); ++ev_idx) {
                     const auto& e = sorted_events[ev_idx];
@@ -1474,6 +1554,83 @@ int main(int argc, char* argv[]) {
                         ImGui::Text("Cnt: %d", it->second.count);
                     }
                     ImGui::EndTooltip();
+                } else if (hovered_measure != nullptr) {
+                    const double s = std::min(hovered_measure->start_ms, hovered_measure->end_ms);
+                    const double e = std::max(hovered_measure->start_ms, hovered_measure->end_ms);
+                    const double dt = std::max(0.0, e - s);
+
+                    ImGui::BeginTooltip();
+                    ImGui::Text("Time Window #%u", hovered_measure->id);
+                    ImGui::Separator();
+                    ImGui::Text("Cursor 1 (start): %.3f ms", s);
+                    ImGui::Text("Cursor 2 (end): %.3f ms", e);
+                    ImGui::Text("Window: %.3f ms", dt);
+                    ImGui::Text("Window: %.6f s", dt / 1000.0);
+                    ImGui::TextDisabled("Double-click timeline to clear all windows");
+                    ImGui::EndTooltip();
+                }
+            }
+
+            if (ImPlot::IsPlotHovered()) {
+                const ImPlotPoint mouse = ImPlot::GetPlotMousePos();
+                const double clamped_x = std::clamp(mouse.x, x_start, x_end);
+                constexpr double kMinMeasureSpanMs = 0.01;
+                const double measure_x_tolerance = std::max(0.5, static_cast<double>(view_window_ms) * 0.003);
+
+                int hovered_measure_index = -1;
+                double hovered_measure_dist = std::numeric_limits<double>::max();
+                for (size_t index = 0; index < timeline_measures.size(); ++index) {
+                    const auto& measure = timeline_measures[index];
+                    const double s = std::min(measure.start_ms, measure.end_ms);
+                    const double e = std::max(measure.start_ms, measure.end_ms);
+                    if (e < x_start || s > x_end) {
+                        continue;
+                    }
+                    const bool inside_band = mouse.x >= s && mouse.x <= e;
+                    const double line_dist = std::min(std::abs(mouse.x - s), std::abs(mouse.x - e));
+                    if (!inside_band && line_dist > measure_x_tolerance) {
+                        continue;
+                    }
+                    const double dist = inside_band ? std::abs(mouse.x - (s + e) * 0.5) : line_dist;
+                    if (dist < hovered_measure_dist) {
+                        hovered_measure_dist = dist;
+                        hovered_measure_index = static_cast<int>(index);
+                    }
+                }
+
+                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                    if (io.KeyCtrl) {
+                        if (hovered_measure_index >= 0 &&
+                            hovered_measure_index < static_cast<int>(timeline_measures.size())) {
+                            timeline_measures.erase(timeline_measures.begin() + hovered_measure_index);
+                        }
+                    } else {
+                        timeline_measures.clear();
+                    }
+                    measure_drag_active = false;
+                } else {
+                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+                        measure_drag_active = true;
+                        measure_drag_start_ms = clamped_x;
+                        measure_drag_current_ms = clamped_x;
+                    }
+
+                    if (measure_drag_active && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                        measure_drag_current_ms = clamped_x;
+                    }
+
+                    if (measure_drag_active && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+                        measure_drag_current_ms = clamped_x;
+                        const double span_ms = std::abs(measure_drag_current_ms - measure_drag_start_ms);
+                        if (span_ms >= kMinMeasureSpanMs) {
+                            TimelineMeasure measure;
+                            measure.start_ms = measure_drag_start_ms;
+                            measure.end_ms = measure_drag_current_ms;
+                            measure.id = next_measure_id++;
+                            timeline_measures.push_back(measure);
+                        }
+                        measure_drag_active = false;
+                    }
                 }
             }
 
