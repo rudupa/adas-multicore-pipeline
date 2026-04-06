@@ -387,16 +387,7 @@ std::vector<LaneDef> build_ordered_lanes(const adas::PipelineConfig& cfg) {
             }
         }
 
-        std::stable_sort(phase_stages.begin(), phase_stages.end(), [](const auto* lhs, const auto* rhs) {
-            const int lhs_rank = stage_group_rank(*lhs);
-            const int rhs_rank = stage_group_rank(*rhs);
-            if (lhs_rank != rhs_rank) {
-                return lhs_rank < rhs_rank;
-            }
-            return lhs->name < rhs->name;
-        });
-
-        for (const auto* stage : phase_stages) {
+        for (const auto* stage : phase_stages) {  // order follows config (phase.stage_ids)
             LaneDef lane;
             lane.key = stage->lane;
             lane.label = stage->name;
