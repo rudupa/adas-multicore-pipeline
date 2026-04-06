@@ -275,6 +275,30 @@ void Pipeline::sensor_loop(Sensor* sensor) {
                 process_camera_frame(std::move(f));
             };
         } else if (is_radar_sensor(*sensor)) {
+            // Apply cycle mode to radar frame dispatch (mirrors central_loop policy)
+            if (is_skip_mode(cfg_)) {
+                uint64_t expected = kNoActiveCycle;
+                if (!active_radar_frame_id_.compare_exchange_strong(expected, frame->frame_id)) {
+                    visualizer_.record_marker(
+                        "cycle-miss", Clock::now(), '!', frame->frame_id,
+                        sensor->name(), "Radar frame skipped: previous frame still processing");
+                    continue;
+                }
+            } else if (is_preempt_mode(cfg_)) {
+                const uint64_t prev = active_radar_frame_id_.exchange(frame->frame_id);
+                if (prev != kNoActiveCycle) {
+                    visualizer_.record_marker(
+                        "frame-drop", Clock::now(), 'X', prev,
+                        sensor->name(), "Radar frame dropped: preempted by newer frame");
+                }
+            } else if (is_allow_overlap_mode(cfg_)) {
+                if (active_radar_count_.load() > 0) {
+                    visualizer_.record_marker(
+                        "overlap", Clock::now(), '^', frame->frame_id,
+                        sensor->name(), "Radar frames overlapping: new frame started before previous completed");
+                }
+                active_radar_count_.fetch_add(1);
+            }
             task.work = [this, f = std::move(frame)]() mutable {
                 process_radar_frame(std::move(f));
             };
@@ -326,20 +350,19 @@ void Pipeline::central_loop() {
             const uint64_t previous_active = active_world_cycle_id_.exchange(frame->frame_id);
             if (previous_active != kNoActiveCycle && previous_active != frame->frame_id) {
                 visualizer_.record_marker(
-                    "cycle-miss", Clock::now(), '!', previous_active,
-                    "central_loop", "Periodic deadline missed: superseded by newer cycle");
+                    "frame-drop", Clock::now(), 'X', previous_active,
+                    "central_loop", "Frame dropped: cycle preempted by newer cycle");
             }
         } else if (skip_mode) {
             active_world_cycle_id_.store(frame->frame_id);
         } else if (allow_overlap_mode) {
-            // Detect overlap: if a cycle is already active, record overlap event
-            const uint64_t active = active_world_cycle_id_.load();
-            if (active != kNoActiveCycle) {
+            // Detect overlap: if any cycle is still in-flight, record overlap event
+            if (active_cycle_count_.load() > 0) {
                 visualizer_.record_marker(
                     "overlap", Clock::now(), '^', frame->frame_id,
                     "central_loop", "Cycles overlapping: new cycle started before previous completed");
             }
-            active_world_cycle_id_.store(frame->frame_id);
+            active_cycle_count_.fetch_add(1);
         }
 
         ScheduledTask task;
@@ -368,6 +391,8 @@ void Pipeline::process_camera_frame(std::shared_ptr<Frame> frame) {
 }
 
 void Pipeline::process_radar_frame(std::shared_ptr<Frame> frame) {
+    const bool preempt_mode = is_preempt_mode(cfg_);
+
     // Preserve legacy behavior when only the coarse radar stage is configured.
     const bool has_detailed_radar_pipeline =
         find_stage_by_id("sense_1_2_1_adc_ingest_and_calibration") != nullptr;
@@ -405,8 +430,11 @@ void Pipeline::process_radar_frame(std::shared_ptr<Frame> frame) {
             "sense_1_2_13_object_list_packaging"
         };
 
-        auto run_stage_list = [this, &frame](const char* const* stage_ids, size_t count) {
+        auto run_stage_list = [this, &frame, preempt_mode](const char* const* stage_ids, size_t count) {
             for (size_t i = 0; i < count; ++i) {
+                if (preempt_mode && active_radar_frame_id_.load() != frame->frame_id) {
+                    return; // superseded by a newer radar frame
+                }
                 if (auto* stage = find_stage_by_id(stage_ids[i])) {
                     run_stage(*stage, frame, false);
                 }
@@ -415,33 +443,45 @@ void Pipeline::process_radar_frame(std::shared_ptr<Frame> frame) {
 
         run_stage_list(pre_stage_ids, sizeof(pre_stage_ids) / sizeof(pre_stage_ids[0]));
 
-        auto signal_branch_a_future = std::async(
-            std::launch::async,
-            run_stage_list,
-            signal_branch_a_ids,
-            sizeof(signal_branch_a_ids) / sizeof(signal_branch_a_ids[0]));
-        auto signal_branch_b_future = std::async(
-            std::launch::async,
-            run_stage_list,
-            signal_branch_b_ids,
-            sizeof(signal_branch_b_ids) / sizeof(signal_branch_b_ids[0]));
-        signal_branch_a_future.get();
-        signal_branch_b_future.get();
+        if (preempt_mode && active_radar_frame_id_.load() != frame->frame_id) goto radar_done;
+
+        {
+            auto signal_branch_a_future = std::async(
+                std::launch::async,
+                run_stage_list,
+                signal_branch_a_ids,
+                sizeof(signal_branch_a_ids) / sizeof(signal_branch_a_ids[0]));
+            auto signal_branch_b_future = std::async(
+                std::launch::async,
+                run_stage_list,
+                signal_branch_b_ids,
+                sizeof(signal_branch_b_ids) / sizeof(signal_branch_b_ids[0]));
+            signal_branch_a_future.get();
+            signal_branch_b_future.get();
+        }
+
+        if (preempt_mode && active_radar_frame_id_.load() != frame->frame_id) goto radar_done;
 
         run_stage_list(detect_and_track_ids, sizeof(detect_and_track_ids) / sizeof(detect_and_track_ids[0]));
 
-        auto radar_only_branch_a_future = std::async(
-            std::launch::async,
-            run_stage_list,
-            radar_only_branch_a_ids,
-            sizeof(radar_only_branch_a_ids) / sizeof(radar_only_branch_a_ids[0]));
-        auto radar_only_branch_b_future = std::async(
-            std::launch::async,
-            run_stage_list,
-            radar_only_branch_b_ids,
-            sizeof(radar_only_branch_b_ids) / sizeof(radar_only_branch_b_ids[0]));
-        radar_only_branch_a_future.get();
-        radar_only_branch_b_future.get();
+        if (preempt_mode && active_radar_frame_id_.load() != frame->frame_id) goto radar_done;
+
+        {
+            auto radar_only_branch_a_future = std::async(
+                std::launch::async,
+                run_stage_list,
+                radar_only_branch_a_ids,
+                sizeof(radar_only_branch_a_ids) / sizeof(radar_only_branch_a_ids[0]));
+            auto radar_only_branch_b_future = std::async(
+                std::launch::async,
+                run_stage_list,
+                radar_only_branch_b_ids,
+                sizeof(radar_only_branch_b_ids) / sizeof(radar_only_branch_b_ids[0]));
+            radar_only_branch_a_future.get();
+            radar_only_branch_b_future.get();
+        }
+
+        if (preempt_mode && active_radar_frame_id_.load() != frame->frame_id) goto radar_done;
 
         run_stage_list(post_stage_ids, sizeof(post_stage_ids) / sizeof(post_stage_ids[0]));
     }
@@ -449,6 +489,14 @@ void Pipeline::process_radar_frame(std::shared_ptr<Frame> frame) {
     {
         std::lock_guard lock(sensor_state_mutex_);
         latest_radar_output_id_ = frame->frame_id;
+    }
+
+radar_done:
+    if (preempt_mode || is_skip_mode(cfg_)) {
+        uint64_t expected = frame->frame_id;
+        active_radar_frame_id_.compare_exchange_strong(expected, kNoActiveCycle);
+    } else if (is_allow_overlap_mode(cfg_)) {
+        active_radar_count_.fetch_sub(1);
     }
 }
 
@@ -535,6 +583,8 @@ void Pipeline::process_central_cycle(std::shared_ptr<Frame> frame) {
     if (preempt_mode || is_skip_mode(cfg_)) {
         uint64_t expected = frame->frame_id;
         active_world_cycle_id_.compare_exchange_strong(expected, kNoActiveCycle);
+    } else if (is_allow_overlap_mode(cfg_)) {
+        active_cycle_count_.fetch_sub(1);
     }
 }
 

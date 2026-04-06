@@ -88,6 +88,11 @@ private:
     // Central/world cycle counter.
     std::atomic<uint64_t>                       world_frame_id_{0};
     std::atomic<uint64_t>                       active_world_cycle_id_{kNoActiveCycle};
+    std::atomic<int>                            active_cycle_count_{0};  // overlap-mode in-flight counter
+
+    // Radar-frame cycle tracking (mirrors central cycle: skip / preempt / overlap).
+    std::atomic<uint64_t>                       active_radar_frame_id_{kNoActiveCycle};
+    std::atomic<int>                            active_radar_count_{0};   // overlap-mode in-flight counter for radar
 
     std::mutex                                  sensor_state_mutex_;
     uint64_t                                    latest_camera_output_id_{0};
