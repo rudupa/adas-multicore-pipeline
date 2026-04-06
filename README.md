@@ -8,13 +8,17 @@ A configurable C++17 simulation of a real-time **Advanced Driver Assistance Syst
 
 | Area | Details |
 |------|---------|
-| **Sensors** | Pluggable sensor framework (Camera, Radar); extensible to Lidar and others |
+| **Sensors** | Pluggable sensor framework (Camera, Radar, vehicle-state); extensible to Lidar and others |
+| **Sensor Jitter** | Per-sensor Gaussian arrival-time jitter (configurable % per sensor) |
 | **Bandwidth** | Global and per-sensor bandwidth caps with frame dropping on overload |
 | **Pipeline** | Config-driven Sense → Plan → Act pipeline with executable stage groups and sub-steps |
-| **Multicore** | Thread pool with configurable worker count |
-| **Scheduling** | Pluggable scheduler interface; ships with FIFO (priority & deadline TODOs) |
-| **Metrics** | End-to-end latency, per-stage time, queue wait time, drop counts |
-| **Config** | JSON-based configuration for sensors, bandwidth, pipeline, and execution |
+| **CDI Architecture** | Parallel deterministic + cognitive branches with merge-gate context fusion before planning |
+| **Multicore** | Thread pool with configurable worker count and per-core task-count tracking |
+| **Scheduling** | Priority-based TaskScheduler (0–99 scale); soft/hard core affinity; deadline miss detection |
+| **Accelerators** | Per-stage GPU/NPU assignment with configurable inference latency and queue depth |
+| **Metrics** | End-to-end latency, per-stage time, queue wait, drop counts, deadline miss tracking |
+| **Config** | JSON schema v2 — sensors, CPU topology, accelerators, execution policy, stage priorities |
+| **Viewer** | Dear ImGui + ImPlot desktop GUI with timeline, throughput, phase inspector, zoom/pan |
 
 ## Project Structure
 
@@ -81,12 +85,15 @@ Run:
 ```
 
 Viewer features:
-- live lane-based timeline plot (sensor/sense-plan-act stage/throttle/drop)
-- per-second throughput chart (frames/sec)
+- live lane-based timeline plot (sensor ingress, Sense/Plan/Act stages, throttle/drop/overlap/cycle-miss markers)
+- dual-line per-second throughput chart: completed FPS and sensor ingress FPS
+- hover tooltip on throughput chart with interpolated time and value for each line
+- crosshairs on both timeline and throughput plots
+- stage lanes ordered by pipeline config (not alphabetically)
 - left-side phase treeview with min/avg/max step execution times and configured sub-steps
 - cycle count and drop/throttle counters
 - larger UI font and auto-aligned windows
-- zoom/scroll controls for timeline inspection (wheel/pinch + pan)
+- zoom/scroll controls for timeline inspection (scroll wheel + drag to pan)
 
 ## Configuration
 
@@ -108,6 +115,7 @@ Additional architecture-level example:
 
 - [ADAS Pipeline Architecture](docs/system/ADAS_Pipeline.md)
 - [Simulator Concepts Guide](docs/System/Simulator_Concepts.md)
+- [Simulator Features Plan](docs/SIMULATOR_FEATURES_PLAN.md) — phased development roadmap (Phases 1–8)
 
 ## Mermaid Generator Tool
 
@@ -161,19 +169,25 @@ Tool location:
 
 - [tools/system_config_gui.py](tools/system_config_gui.py)
 
-## Extension Points (TODOs)
+## Extension Points (Planned)
 
 - **LidarSensor** — add a new sensor type implementing `Sensor` interface
-- **PriorityScheduler** — order tasks by `TaskPriority`
-- **DeadlineScheduler** — earliest-deadline-first ordering
-- **CPU Affinity** — pin thread-pool workers to specific cores
 - **Per-sensor bandwidth accounting** — track sliding-window usage per sensor independently
+- **Accelerator queue simulation** — GPU/NPU/DSP contention and queue-depth overflow (Phase 3)
+- **Dataflow staleness tracking** — age-of-data metadata propagated through pipeline stages (Phase 4)
+- **Latency histograms and metrics export** — per-stage latency distribution and JSON/CSV export (Phase 5)
+- **Gantt chart visualization** — per-CPU-core task timeline with deadline miss indicators (Phase 6)
+- **Live config UI** — in-viewer scheduler policy, affinity, jitter, and priority controls (Phase 7)
+- **Thermal throttling and power modeling** — frequency scaling under load, per-component power (Phase 8)
 
 ## Dependencies
 
 - C++17 compiler
 - CMake ≥ 3.16
 - [nlohmann/json](https://github.com/nlohmann/json) (fetched automatically via CMake FetchContent)
+- [GLFW](https://www.glfw.org/) (fetched automatically via CMake FetchContent)
+- [Dear ImGui](https://github.com/ocornut/imgui) (fetched automatically via CMake FetchContent)
+- [ImPlot](https://github.com/epezent/implot) (fetched automatically via CMake FetchContent)
 
 ## License
 
