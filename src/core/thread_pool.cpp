@@ -28,6 +28,10 @@ void ThreadPool::shutdown() {
     {
         std::lock_guard lock(mutex_);
         if (stop_) return;
+        // Strict stop behavior: drop queued (not-yet-started) tasks.
+        // In-flight tasks are allowed to finish naturally.
+        std::queue<std::function<void()>> empty;
+        task_queue_.swap(empty);
         stop_ = true;
     }
     cv_.notify_all();

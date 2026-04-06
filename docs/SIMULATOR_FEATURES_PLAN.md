@@ -1,8 +1,8 @@
 # ADAS Multicore Pipeline Simulator - Features Plan
 
-**Current Phase**: Phase 2 - Scheduling & Execution Engine (In Progress)  
+**Current Phase**: Phase 3 - Accelerator Modeling (Planning)  
 **Last Updated**: April 5, 2026  
-**Build Status**: ✅ Phase 1 Complete
+**Build Status**: ✅ Phase 2 Complete
 
 ---
 
@@ -34,25 +34,24 @@
 
 ---
 
-### Phase 2: Scheduling & Execution Engine 🔄 IN PROGRESS
+### Phase 2: Scheduling & Execution Engine ✅ COMPLETE
 
-#### Planning:
-- [ ] Implement TaskScheduler class with priority queue support
-- [ ] Core affinity binding (pin tasks to preferred cores)
-- [ ] Task preemption model (higher priority can preempt lower)
-- [ ] Deadline miss detection (track if stage exceeds expected exec time)
-- [ ] Jitter injection at sensor arrival and stage execution
-- [ ] Per-core task tracking and utilization metrics
-- [ ] Sporadic task support (unscheduled sensor arrivals)
-- [ ] Deadline tracking and violation logging
 
+#### Completed:
+- [x] Implemented TaskScheduler class with priority queue support
+- [x] Core affinity binding (soft: prefer core, hard: pin to core)
+- [x] Deadline miss detection (track if stage exceeds expected exec time)
+- [x] Jitter injection at sensor arrival (Gaussian distribution)
+- [x] Per-core task tracking and utilization metrics
+- [x] Deadline tracking and violation logging in metrics
 #### Deliverables:
-- [ ] New TaskScheduler class (src/core/task_scheduler.h/cpp)
-- [ ] Modified Pipeline executor to use scheduler
-- [ ] Deadline miss detection in metrics collection
-- [ ] Jitter injection in sensor timing and stage execution
-- [ ] Updated viewer metrics display with scheduler info
+- [x] New TaskScheduler class (src/core/task_scheduler.h/cpp) - 150 LOC
+- [x] Modified Pipeline executor to use scheduler - integrated into Pipeline constructor
+- [x] Deadline miss detection in metrics collection - record_deadline_miss() method
+- [x] Jitter injection in sensor timing - applied in sensor_loop()
+- [x] Enhanced MetricsCollector with deadline tracking
 
+**Commit**: `aae7446` - Phase 2 complete with 773+ lines
 ---
 
 ### Phase 3: Accelerator Modeling 📋 PLANNED
@@ -188,9 +187,9 @@
 | Core affinity pinning | 1 | ✅ | ✅ | ✅ | ⏳ | ⏳ | ⏳ | ⏳ |
 | Accelerator configs | 1 | ✅ | ✅ | ✅ | ⏳ | ⏳ | ⏳ | ⏳ |
 | Sensor jitter | 1 | ✅ | ✅ | ✅ | ⏳ | ⏳ | ⏳ | ⏳ |
-| **Priority scheduler** | 2 | 🔄 | ✅ | ✅ | 🔄 | ⏳ | ⏳ | ⏳ |
-| **Deadline detection** | 2 | 🔄 | ✅ | ✅ | 🔄 | 🔄 | ⏳ | ⏳ |
-| **Per-core utilization** | 2 | 🔄 | ✅ | ✅ | 🔄 | 🔄 | ⏳ | ⏳ |
+| **Priority scheduler** | 2 | ✅ | ✅ | ✅ | ✅ | ⏳ | ⏳ | ⏳ |
+| **Deadline detection** | 2 | ✅ | ✅ | ✅ | ✅ | ✅ | ⏳ | ⏳ |
+| **Per-core utilization** | 2 | ✅ | ✅ | ✅ | ✅ | ✅ | ⏳ | ⏳ |
 | GPU queue simulation | 3 | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | Staleness tracking | 4 | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
 | Latency histogram | 5 | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ | ⏳ |
@@ -202,19 +201,52 @@ Legend: ✅ = Complete | 🔄 = In Progress | ⏳ = Planned | ❌ = Not Planned
 
 ---
 
+## CDI Integration Track (VLM/VLA + Deterministic Stack)
+
+### Current CDI Status
+- [x] Parallel branch structure implemented in runtime flow:
+   - Deterministic branch: Fusion -> Localization -> World Map
+   - Cognitive branch: Semantic Reasoning -> Intent Generation -> Semantic Adapter -> SCE -> CDNP
+- [x] Merge gate before planning implemented:
+   - Context Fusion stage joins deterministic world model + cognitive negotiated context
+- [x] Config updated with executable CDI stages and timing/priority/core/accelerator bindings
+- [x] Execution-view descriptors added for CDI stages and sub-steps
+
+### CDI Components Modeled as Pipeline Stages (Implemented)
+- [x] Cognitive Agent inference (VLM/VLA semantic reasoning)
+- [x] Intent generation
+- [x] Semantic Adapter (model-specific output to SOC-like package)
+- [x] SCE validation stage (simulated timing stage)
+- [x] CDNP negotiation stage (simulated timing stage)
+- [x] Planner context fusion stage
+
+### CDI Behavioral Simulation (Next)
+- [ ] SCE verdict engine with ACCEPT / LIMITED / REJECT outputs
+- [ ] CDNP bounded negotiation rounds with ACCEPT / COUNTER / ABORT outcomes
+- [ ] SSH mode machine: CDI_ENHANCED -> DETERMINISTIC_ONLY -> MRC
+- [ ] SSH trigger simulation (10 triggers from CDI architecture)
+- [ ] USTES-style audit/event logging for SCE/CDNP/SSH decisions
+
+### ASIL/Authority Guardrail in Simulator
+- [x] Cognitive channel modeled as advisory context only
+- [x] Deterministic planner remains execution authority
+- [ ] SSH hard override path and deterministic-only fallback enforcement (behavioral)
+
+---
+
 ## 🎯 Alignment with User Requirements
 
 ### 9-Point Feature Requirements:
 
 1. **Real-time Scheduling** (p, sp, p, d) → **Phase 2/3**
-   - Priority-based scheduling ✅ Config, 🔄 Engine
-   - Sporadic task support 🔄 Phase 2
-   - Deadline detection 🔄 Phase 2
+   - Priority-based scheduling ✅ Config, ✅ Engine
+   - Sporadic task support ✅ Foundation in Phase 2
+   - Deadline detection ✅ Phase 2
    
-2. **Multi-core CPU Simulation** ✅ Config, 🔄 Engine
+2. **Multi-core CPU Simulation** ✅ Config, ✅ Engine
    - Core topology ✅
-   - Core affinity ✅ Config, 🔄 Engine
-   - Preemption 🔄 Phase 2
+   - Core affinity ✅ Config, ✅ Engine
+   - Preemption ✅ Simplified model in Phase 2
    
 3. **GPU/NPU/DSP Accelerators** ✅ Config, ⏳ Phase 3
    - Accelerator configs ✅
@@ -236,9 +268,9 @@ Legend: ✅ = Complete | 🔄 = In Progress | ⏳ = Planned | ❌ = Not Planned
    - Fault injection flags ✅ Config
    - Thermal throttling ⏳
    
-7. **Metrics & Visualization** ⏳ Phases 5/6
-   - Deadline miss rate ⏳ Phase 5
-   - Per-core utilization ⏳ Phase 2/5
+7. **Metrics & Visualization** 🔄 Phases 2/5/6
+   - Deadline miss rate ✅ Basic in Phase 2, ⏳ histogram in Phase 5
+   - Per-core utilization ✅ Basic in Phase 2, ⏳ advanced in Phase 5
    - Latency histograms ⏳ Phase 5
    - Gantt charts ⏳ Phase 6
    
@@ -308,10 +340,10 @@ config/adas_pipeline_config.json   // cpu_cores, accelerators, sensor_jitter, me
 
 ## 🚀 Next Actions
 
-1. **Immediate**: Start Phase 2 implementation (TaskScheduler class)
-2. **Short-term**: Integrate scheduler into pipeline executor
-3. **Medium-term**: Phases 3-5 (accelerators, sensors, metrics)
-4. **Long-term**: Phases 6-8 (visualization, UI, advanced features)
+1. **Immediate**: Start Phase 3 implementation (GPU/NPU/DSP accelerator queues)
+2. **Short-term**: Add SCE/CDNP outcome metrics and SSH mode simulation
+3. **Medium-term**: Phases 4-6 (sensor timing, metrics, visualization)
+4. **Long-term**: Phases 7-8 (configuration UI, advanced safety/perf models)
 
 ---
 

@@ -10,7 +10,10 @@
 #include <algorithm>
 #include <chrono>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
+#include <future>
+#include <limits>
 #include <utility>
 #include <thread>
 
@@ -144,7 +147,9 @@ void Pipeline::start() {
     // Periodic metrics printer
     metrics_thread_ = std::thread([this] {
         while (running_) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            // Poll in short intervals so stop() is noticed quickly.
+            for (int i = 0; i < 20 && running_; ++i)
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
             if (running_) metrics_.print_periodic_update();
         }
     });
@@ -208,13 +213,22 @@ void Pipeline::sensor_loop(Sensor* sensor) {
         }
         
         if (jitter_pct > 0.0) {
-            // Apply jitter to frame timing
-            uint32_t frame_time_us = std::chrono::duration_cast<std::chrono::microseconds>(
-                frame->created_at.time_since_epoch()).count();
-            uint32_t jittered_time_us = JitterSimulator::apply_jitter(frame_time_us, jitter_pct);
-            auto jitter_duration = std::chrono::microseconds(jittered_time_us - frame_time_us);
-            if (jitter_duration.count() > 0) {
-                std::this_thread::sleep_for(jitter_duration);
+            // Jitter the sensor's frame interval (not an absolute epoch timestamp)
+            // to avoid overflow and unrealistic multi-second delays.
+            const double fps = std::max(1e-6, sensor->fps());
+            const uint32_t base_interval_us = static_cast<uint32_t>(
+                std::llround(std::min(1'000'000.0 / fps,
+                                      static_cast<double>(std::numeric_limits<uint32_t>::max()))));
+            const uint32_t jittered_interval_us =
+                JitterSimulator::apply_jitter(base_interval_us, jitter_pct);
+
+            const int64_t jitter_delta_us =
+                static_cast<int64_t>(jittered_interval_us) - static_cast<int64_t>(base_interval_us);
+            if (jitter_delta_us > 0) {
+                // Clamp to keep shutdown responsive even with aggressive jitter settings.
+                constexpr int64_t kMaxJitterSleepUs = 50'000;
+                std::this_thread::sleep_for(
+                    std::chrono::microseconds(std::min(jitter_delta_us, kMaxJitterSleepUs)));
             }
         }
 
@@ -336,7 +350,9 @@ void Pipeline::central_loop() {
         };
         scheduler_->enqueue(std::move(task));
 
-        std::this_thread::sleep_until(next_tick);
+        // Sleep in small increments so stop() is noticed promptly.
+        while (running_ && Clock::now() < next_tick)
+            std::this_thread::sleep_for(std::chrono::milliseconds(2));
     }
 }
 
@@ -363,11 +379,21 @@ void Pipeline::process_radar_frame(std::shared_ptr<Frame> frame) {
 }
 
 void Pipeline::process_central_cycle(std::shared_ptr<Frame> frame) {
-    static const char* central_stage_ids[] = {
-        "sense_1_3_sensor_acquisition",
+    static const char* pre_branch_stage_id = "sense_1_3_sensor_acquisition";
+    static const char* deterministic_branch_ids[] = {
         "sense_1_4_fusion",
         "sense_1_5_localization",
-        "sense_1_6_world_map_build",
+        "sense_1_6_world_map_build"
+    };
+    static const char* cognitive_branch_ids[] = {
+        "sense_1_7_cognitive_semantic_reasoning",
+        "sense_1_8_cognitive_intent_generation",
+        "sense_1_9_semantic_adapter",
+        "sense_1_10_sce_validation",
+        "sense_1_11_cdnp_negotiation"
+    };
+    static const char* post_merge_stage_ids[] = {
+        "plan_2_0_context_fusion",
         "plan_2_1_prediction",
         "plan_2_2_behavior_planning",
         "plan_2_3_trajectory_planning",
@@ -378,7 +404,49 @@ void Pipeline::process_central_cycle(std::shared_ptr<Frame> frame) {
 
     const bool preempt_mode = is_preempt_mode(cfg_);
 
-    for (const char* stage_id : central_stage_ids) {
+    // Stage 1: Acquire synchronized sensor snapshot before splitting branches
+    if (auto* stage = find_stage_by_id(pre_branch_stage_id)) {
+        run_stage(*stage, frame, true);
+    }
+
+    if (preempt_mode && active_world_cycle_id_.load() != frame->frame_id) {
+        return; // superseded by a newer periodic cycle
+    }
+
+    // Stage 2: Execute deterministic and cognitive branches in parallel.
+    // Both consume the same synchronized snapshot and rejoin before planning.
+    auto run_branch = [this, &frame, preempt_mode](const char* const* stage_ids, size_t count) {
+        for (size_t i = 0; i < count; ++i) {
+            if (preempt_mode && active_world_cycle_id_.load() != frame->frame_id) {
+                return;
+            }
+            if (auto* stage = find_stage_by_id(stage_ids[i])) {
+                run_stage(*stage, frame, true);
+            }
+        }
+    };
+
+    auto deterministic_future = std::async(
+        std::launch::async,
+        run_branch,
+        deterministic_branch_ids,
+        sizeof(deterministic_branch_ids) / sizeof(deterministic_branch_ids[0]));
+
+    auto cognitive_future = std::async(
+        std::launch::async,
+        run_branch,
+        cognitive_branch_ids,
+        sizeof(cognitive_branch_ids) / sizeof(cognitive_branch_ids[0]));
+
+    deterministic_future.get();
+    cognitive_future.get();
+
+    if (preempt_mode && active_world_cycle_id_.load() != frame->frame_id) {
+        return; // superseded while branches were in-flight
+    }
+
+    // Stage 3: Merge deterministic + cognitive context, then plan and act.
+    for (const char* stage_id : post_merge_stage_ids) {
         if (preempt_mode && active_world_cycle_id_.load() != frame->frame_id) {
             return; // superseded by a newer periodic cycle
         }

@@ -25,10 +25,13 @@ void RadarSensor::stop() {
 std::shared_ptr<Frame> RadarSensor::generateFrame() {
     if (!running_) return nullptr;
 
-    // Simulate sensor timing — sleep for one frame period
+    // Simulate sensor timing — sleep for one frame period in small
+    // increments so stop() is noticed promptly (within ~10 ms).
     auto period = std::chrono::microseconds(
         static_cast<int64_t>(1'000'000.0 / fps_));
-    std::this_thread::sleep_for(period);
+    auto deadline = std::chrono::steady_clock::now() + period;
+    while (running_ && std::chrono::steady_clock::now() < deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
     if (!running_) return nullptr;
 

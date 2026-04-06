@@ -377,9 +377,63 @@
           "1.6.2_semantic_layer_fusion",
           "1.6.3_drivable_area_update"
         ]
+      },
+      "1.7_cognitive_semantic_reasoning": {
+        "execution_model": "parallel_vlm_vla_branch",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "1.7.1_multimodal_feature_encoding",
+          "1.7.2_scene_graph_and_semantics",
+          "1.7.3_risk_context_reasoning"
+        ]
+      },
+      "1.8_cognitive_intent_generation": {
+        "execution_model": "parallel_vla_policy_head",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "1.8.1_agent_intent_hypothesis",
+          "1.8.2_ego_intent_recommendation",
+          "1.8.3_confidence_estimation"
+        ]
+      },
+      "1.9_semantic_adapter": {
+        "execution_model": "model_specific_to_soc_translation",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "1.9.1_soc_family_mapping",
+          "1.9.2_cross_family_references",
+          "1.9.3_contract_versioning"
+        ]
+      },
+      "1.10_sce_validation": {
+        "execution_model": "deterministic_validator_chain",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "1.10.1_schema_and_temporal_validation",
+          "1.10.2_grounding_and_feasibility_checks",
+          "1.10.3_verdict_and_constraint_compilation"
+        ]
+      },
+      "1.11_cdnp_negotiation": {
+        "execution_model": "bounded_multi_round_negotiation",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "1.11.1_constraint_proposal",
+          "1.11.2_feasibility_response_loop",
+          "1.11.3_negotiated_constraints_output"
+        ]
       }
     },
     "plan": {
+      "2.0_context_fusion": {
+        "execution_model": "deterministic_plus_cognitive_merge",
+        "placement": "compute_ecu_main",
+        "sub_steps": [
+          "2.0.1_join_world_model_and_semantic_context",
+          "2.0.2_merge_intent_priors",
+          "2.0.3_generate_planner_context"
+        ]
+      },
       "2.1_prediction": {
         "execution_model": "periodic_per_planning_cycle",
         "placement": "compute_ecu_main",
@@ -788,6 +842,86 @@
                 "mapped_nodes": [
                   "compute_ecu_main"
                 ]
+              },
+              {
+                "id": "sense_1_7_cognitive_semantic_reasoning",
+                "name": "1.7 Cognitive semantic reasoning (VLM)",
+                "kind": "task",
+                "priority": 70,
+                "preferred_core": 6,
+                "accelerator": "gpu",
+                "execution_times": {
+                  "min_ms": 4.0,
+                  "avg_ms": 6.5,
+                  "max_ms": 10.5
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_8_cognitive_intent_generation",
+                "name": "1.8 Cognitive intent generation (VLA)",
+                "kind": "task",
+                "priority": 75,
+                "preferred_core": 7,
+                "accelerator": "npu",
+                "execution_times": {
+                  "min_ms": 2.5,
+                  "avg_ms": 4.2,
+                  "max_ms": 7.0
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_9_semantic_adapter",
+                "name": "1.9 Semantic adapter",
+                "kind": "task",
+                "priority": 78,
+                "preferred_core": 7,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 0.6,
+                  "avg_ms": 1.1,
+                  "max_ms": 2.0
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_10_sce_validation",
+                "name": "1.10 SCE validation",
+                "kind": "task",
+                "priority": 85,
+                "preferred_core": 4,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 1.2,
+                  "avg_ms": 2.0,
+                  "max_ms": 3.6
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
+              {
+                "id": "sense_1_11_cdnp_negotiation",
+                "name": "1.11 CDNP negotiation",
+                "kind": "task",
+                "priority": 84,
+                "preferred_core": 4,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 1.0,
+                  "avg_ms": 1.8,
+                  "max_ms": 3.2
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
               }
             ]
           },
@@ -804,6 +938,22 @@
               "compute_ecu_main"
             ],
             "steps": [
+              {
+                "id": "plan_2_0_context_fusion",
+                "name": "2.0 Context fusion (deterministic + cognitive)",
+                "kind": "task",
+                "priority": 80,
+                "preferred_core": 5,
+                "accelerator": "",
+                "execution_times": {
+                  "min_ms": 0.8,
+                  "avg_ms": 1.4,
+                  "max_ms": 2.5
+                },
+                "mapped_nodes": [
+                  "compute_ecu_main"
+                ]
+              },
               {
                 "id": "plan_2_1_prediction",
                 "name": "2.1 Prediction",

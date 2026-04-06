@@ -14,6 +14,9 @@ void FifoScheduler::enqueue(ScheduledTask task) {
 bool FifoScheduler::dequeue(ScheduledTask& out) {
     std::unique_lock lock(mutex_);
     cv_.wait(lock, [this] { return !queue_.empty() || closed_; });
+    // Strict stop behavior: once closed, do not drain remaining queued tasks.
+    // This keeps run_duration_seconds as a hard simulation window.
+    if (closed_) return false;
     if (queue_.empty()) return false;
     out = std::move(queue_.front());
     queue_.pop();
